@@ -1,0 +1,123 @@
+# Builds the module on GitHub's Linux runners.
+#
+# The repository's own pipeline (build.ps1) is deliberately offline: it drives a
+# vendored JDK and Android SDK under .tools/, which is git-ignored because it is
+# ~2.4 GB. A runner has no such directory, so this workflow uses the Gradle build
+# the repository already declares - it needs nothing beyond the checkout, the
+# tracked .tools/maven repository and public Maven artifacts.
+#
+# The APK is signed with the tracked .tools/debug.keystore, the same key the
+# offline pipeline uses, so it installs in place over an existing HyperDuo.
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      versionName:
+        description: versionName to stamp
+        required: false
+        default: 1.5-overlay
+      versionCode:
+        description: versionCode to stamp (must be higher than the installed one)
+        required: false
+        default: '10500'
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK platform 37 + build-tools
+        run: |
+          set -x
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          TOOLS="$(ls -1d "$SDK"/cmdline-tools/*/bin 2>/dev/null | tail -1)"
+          export PATH="$TOOLS:$PATH"
+          # The image already ships cmdline-tools; android-actions/setup-android is
+          # not used because it insists on installing the retired "tools" package,
+          # which no longer exists in the repository and fails the step outright.
+          #
+          # API 37 also ships as minor releases: there is no "platforms;android-37",
+          # only 37.0 / 37.1 / 37.2.
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0" \
+            || sdkmanager --channel=3 --install "platforms;android-37.2" "build-tools;37.0.0"
+          ls -1 "$SDK/platforms"
+          # compileSdk 37 reads the platform directory named android-37, while the
+          # package installs as android-37.<minor>: make one name point at the other
+          # instead of pinning the build to whichever minor happens to be current.
+          if [ ! -d "$SDK/platforms/android-37" ]; then
+            minor=$(ls -1d "$SDK"/platforms/android-37.* 2>/dev/null | head -1)
+            if [ -n "$minor" ]; then
+              ln -sfn "$(basename "$minor")" "$SDK/platforms/android-37"
+            fi
+          fi
+          ls -l "$SDK/platforms"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.8.0'
+
+      - name: Resolve version
+        id: stamp
+        env:
+          INPUT_NAME: ${{ github.event.inputs.versionName }}
+          INPUT_CODE: ${{ github.event.inputs.versionCode }}
+        run: |
+          echo "name=${INPUT_NAME:-1.5-overlay}" >> "$GITHUB_OUTPUT"
+          echo "code=${INPUT_CODE:-10500}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        run: |
+          gradle --no-daemon assembleRelease \
+            -PhyperduoVersionName="${{ steps.stamp.outputs.name }}" \
+            -PhyperduoVersionCode="${{ steps.stamp.outputs.code }}"
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+             "dist/HyperDuo-${{ steps.stamp.outputs.name }}.apk"
+
+      # The runner's network can reach GitHub; the phone this is installed from
+      # cannot reach the artifact or release blobs. When the workflow is started
+      # by hand, the APK is also written out as base64 in the log, which the API
+      # can serve - so the build is still installable from here.
+      - name: Dump the APK for the log
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "APK-BASE64-BEGIN"
+          base64 -w 0 dist/HyperDuo-*.apk | fold -w 200
+          echo
+          echo "APK-BASE64-END"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HyperDuo-${{ steps.stamp.outputs.name }}
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Publish a release for the APK
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-${{ steps.stamp.outputs.name }}
+          name: HyperDuo ${{ steps.stamp.outputs.name }} (CI)
+          files: dist/*.apk
+          prerelease: true

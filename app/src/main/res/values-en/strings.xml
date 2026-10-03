@@ -22,6 +22,9 @@
     <string name="trio_style_ring">Ring</string>
     <string name="trio_style_rect">Rectangular</string>
 
+    <string name="overlay_title">Draw in its own window</string>
+    <string name="overlay_summary">Draw the glyph in a window of its own, no longer clipped to the status bar\'s own height (about 43dp), so the whole icon can be shown. The lower part of the glyph then hangs outside the status bar background. Turn off to draw inside the bar again.</string>
+
     <string name="show_wifi_title">Show Wi-Fi arcs</string>
     <string name="show_wifi_summary">Draw the Wi-Fi arcs; the number of arcs follows the real signal level. Turn off to send the stock Wi-Fi icon back to its usual place in the status bar.</string>
 

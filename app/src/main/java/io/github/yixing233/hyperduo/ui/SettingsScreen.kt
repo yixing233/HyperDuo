@@ -655,6 +655,18 @@ private fun LazyListScope.generalTab(
                 enabled = a.glyph,
                 onSelectedIndexChange = { index -> update { repo -> repo.setTrioStyle(index) } },
             )
+            // Where the glyph is drawn, not what it draws. The status bar window
+            // is only about 43dp tall and clips the rest, so this is the switch
+            // between "whole glyph, in a window of its own" and "inside the bar,
+            // cut down to the bar's height".
+            SwitchPreference(
+                checked = settings.overlayGlyph,
+                onCheckedChange = { value -> update { it.setOverlay(value) } },
+                title = stringResource(R.string.overlay_title),
+                summary = stringResource(R.string.overlay_summary),
+                insideMargin = SettingsItemMargin,
+                enabled = a.glyph,
+            )
             SwitchPreference(
                 checked = a.wifi,
                 onCheckedChange = { value -> update { it.setShowWifi(value) } },

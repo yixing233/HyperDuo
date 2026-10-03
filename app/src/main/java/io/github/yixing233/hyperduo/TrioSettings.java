@@ -82,6 +82,15 @@ public final class TrioSettings {
      * icon in place the module draws no signal for this to narrow.
      */
     public boolean dataSimOnly;
+    /**
+     * Draws the glyph in a window of its own instead of in the status bar view.
+     *
+     * <p>Stored under the frozen key {@link Prefs#KEY_OVERLAY}. The status bar
+     * window is about 43dp tall and clips what it cannot show; this flag is what
+     * lets the glyph be drawn whole, at the price of hanging below the bar's own
+     * background.
+     */
+    public boolean overlayGlyph;
 
     public boolean roleColors;
     public int criticalOnDark;
@@ -154,6 +163,7 @@ public final class TrioSettings {
         s.signalMode = Prefs.DEF_SIGNAL_MODE;
         s.stackedSignal = Prefs.DEF_STACKED_SIGNAL;
         s.dataSimOnly = Prefs.DEF_DATA_SIM_ONLY;
+        s.overlayGlyph = Prefs.DEF_OVERLAY;
 
         s.roleColors = Prefs.DEF_ROLE_COLORS;
         s.criticalOnDark = Prefs.DEF_COLOR_CRITICAL_ON_DARK;
@@ -204,6 +214,7 @@ public final class TrioSettings {
                 Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
         s.stackedSignal = p.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
         s.dataSimOnly = p.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
+        s.overlayGlyph = p.getBoolean(Prefs.KEY_OVERLAY, Prefs.DEF_OVERLAY);
 
         s.roleColors = p.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = p.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -320,6 +331,7 @@ public final class TrioSettings {
         s.signalMode = signalMode;
         s.stackedSignal = stackedSignal;
         s.dataSimOnly = dataSimOnly;
+        s.overlayGlyph = overlayGlyph;
 
         s.roleColors = roleColors;
         s.criticalOnDark = criticalOnDark;
@@ -379,6 +391,7 @@ public final class TrioSettings {
             case Prefs.KEY_SIGNAL_MODE: signalMode = src.signalMode; return true;
             case Prefs.KEY_STACKED_SIGNAL: stackedSignal = src.stackedSignal; return true;
             case Prefs.KEY_DATA_SIM_ONLY: dataSimOnly = src.dataSimOnly; return true;
+            case Prefs.KEY_OVERLAY: overlayGlyph = src.overlayGlyph; return true;
             case Prefs.KEY_ROLE_COLORS: roleColors = src.roleColors; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_DARK: criticalOnDark = src.criticalOnDark; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_LIGHT: criticalOnLight = src.criticalOnLight; return true;
@@ -435,6 +448,7 @@ public final class TrioSettings {
                 Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
         s.stackedSignal = bundle.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
         s.dataSimOnly = bundle.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
+        s.overlayGlyph = bundle.getBoolean(Prefs.KEY_OVERLAY, Prefs.DEF_OVERLAY);
 
         s.roleColors = bundle.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = bundle.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -533,6 +547,7 @@ public final class TrioSettings {
         b.putInt(Prefs.KEY_SIGNAL_MODE, signalMode);
         b.putBoolean(Prefs.KEY_STACKED_SIGNAL, stackedSignal);
         b.putBoolean(Prefs.KEY_DATA_SIM_ONLY, dataSimOnly);
+        b.putBoolean(Prefs.KEY_OVERLAY, overlayGlyph);
 
         b.putBoolean(Prefs.KEY_ROLE_COLORS, roleColors);
         b.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, criticalOnDark);

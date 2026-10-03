@@ -22,6 +22,9 @@
     <string name="trio_style_ring">圆环</string>
     <string name="trio_style_rect">矩形</string>
 
+    <string name="overlay_title">独立窗口绘制</string>
+    <string name="overlay_summary">把三合一画在一个独立的小窗口里，不再受状态栏窗口高度（约 43dp）限制，图标可以完整显示；代价是图形下半部分会露在状态栏背景之外。关闭后回到状态栏内绘制。</string>
+
     <string name="show_wifi_title">显示 Wi-Fi 弧</string>
     <string name="show_wifi_summary">在最外层绘制 Wi-Fi 弧线，弧数跟随实际信号强度；关闭后原生 Wi-Fi 图标回到状态栏原本的位置。</string>
 

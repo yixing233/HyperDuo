@@ -1,6 +1,7 @@
 package io.github.yixing233.hyperduo;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.SystemClock;
 import android.telephony.SignalStrength;
@@ -86,6 +87,8 @@ final class TrioState {
 
     /** Telephony app context, captured from the first hooked view. */
     private static volatile Context sContext;
+    /** Last tint line logged, so a per-frame call site logs only when it changes. */
+    private static volatile String sLastTint;
     /** Next {@link SystemClock#elapsedRealtime} at which telephony may be polled. */
     private static volatile long sSimsDueAt;
     /** How often telephony is polled. Signal strength is not a per-frame value. */
@@ -398,11 +401,48 @@ final class TrioState {
 
     /** The plain icon colour: what MIUI would paint the battery icon in. */
     int foreground() {
+        // The style follows the bar, not the system theme: MIUI's own fields say
+        // what this bar is drawing on, and they are the same pair its icons use.
+        // They are the first and only real answer here; the system's night mode is
+        // kept as the last resort for a host whose fields never arrived (a host
+        // inflated a moment ago, a bar whose tint never came through).
         int c = useTint ? tintColor : (darkIntensity > 0f ? darkColor : lightColor);
         if (c == 0) {
-            c = DEFAULT_FOREGROUND;
+            c = nightMode() ? 0xFFFFFFFF : DEFAULT_FOREGROUND;
         }
+        noteTint(c);
         return c;
+    }
+
+    /**
+     * Records the tint inputs once per change, so the values MIUI is handing over
+     * can be read off a device instead of guessed at.
+     */
+    private void noteTint(int resolved) {
+        final String note = "tint: useTint=" + useTint
+                + " tint=" + Integer.toHexString(tintColor)
+                + " light=" + Integer.toHexString(lightColor)
+                + " dark=" + Integer.toHexString(darkColor)
+                + " intensity=" + darkIntensity
+                + " -> " + Integer.toHexString(resolved);
+        if (!note.equals(sLastTint)) {
+            sLastTint = note;
+            TrioHooks.log(TrioHooks.LOG_INFO, note);
+        }
+    }
+
+    /** The system's night mode, as the configuration currently reports it. */
+    private boolean nightMode() {
+        final Context context = sContext;
+        if (context == null) {
+            return false;
+        }
+        try {
+            return (context.getResources().getConfiguration().uiMode
+                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     // ------------------------------------------------------------ signal levels

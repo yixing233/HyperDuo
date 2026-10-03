@@ -74,9 +74,16 @@ final class TrioRenderer {
      * picked up by the very next frame.
      */
     static void draw(Canvas canvas, View host, TrioState s, TrioSettings cfg) {
-        final int w = host.getWidth();
-        final int h = host.getHeight();
-        if (w <= 0 || h <= 0) {
+        drawState(canvas, host.getWidth(), host.getHeight(), s, cfg);
+    }
+
+    /**
+     * The same frame for a caller that has a canvas of its own instead of a host
+     * view to measure: the glyph window of {@code TrioOverlay} is sized by its
+     * own layout params, and there is no hooked view behind it to ask.
+     */
+    static void drawState(Canvas canvas, int w, int h, TrioState s, TrioSettings cfg) {
+        if (w <= 0 || h <= 0 || s == null || cfg == null) {
             return;
         }
         drawInto(canvas, w, h, s.level, s.charging, s.quickCharging, s.powerSave, s.low,

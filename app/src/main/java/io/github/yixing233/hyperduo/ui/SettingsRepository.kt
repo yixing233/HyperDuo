@@ -57,6 +57,9 @@ class SettingsRepository(context: Context) {
     fun setStackedSignal(value: Boolean) = writeBoolean(Prefs.KEY_STACKED_SIGNAL, value)
     fun setDataSimOnly(value: Boolean) = writeBoolean(Prefs.KEY_DATA_SIM_ONLY, value)
 
+    /** Draws the glyph in a window of its own - see [Prefs.KEY_OVERLAY]. */
+    fun setOverlay(value: Boolean) = writeBoolean(Prefs.KEY_OVERLAY, value)
+
     // ----------------------------------------------------------------- colours
 
     fun setRoleColors(value: Boolean) = writeBoolean(Prefs.KEY_ROLE_COLORS, value)
@@ -135,6 +138,7 @@ class SettingsRepository(context: Context) {
             prefs.putInt(Prefs.KEY_SIGNAL_MODE, snapshot.signalMode)
             prefs.putBoolean(Prefs.KEY_STACKED_SIGNAL, snapshot.stackedSignal)
             prefs.putBoolean(Prefs.KEY_DATA_SIM_ONLY, snapshot.dataSimOnly)
+            prefs.putBoolean(Prefs.KEY_OVERLAY, snapshot.overlayGlyph)
 
             prefs.putBoolean(Prefs.KEY_ROLE_COLORS, snapshot.roleColors)
             prefs.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, snapshot.criticalOnDark)

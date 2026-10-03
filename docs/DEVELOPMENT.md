@@ -36,6 +36,8 @@ io.github.yixing233.hyperduo
 ├─ TrioSettings.java     跨进程配置快照（值对象，刻意不依赖 Xposed API）
 ├─ TrioConfig.java       hook 侧：绑定 remote preferences 并热更新快照
 ├─ TrioHooks.java        全部 hook 安装与容器折叠逻辑
+├─ TrioOverlay.java      独立窗口绘制：状态栏窗口只有约 43dp 高并裁掉多余部分，
+│                      这里另开一个只有图标那么大、不接收触摸的窗口
 ├─ TrioState.java        电量 / 信号等级 / 前景色等运行期状态
 ├─ TrioGeometry.java     120×120 设计空间的几何常量
 ├─ TrioAppearance.java   外观规则：每个元素该不该画、画在哪（渲染器与预览共用）

@@ -2,6 +2,7 @@ package io.github.yixing233.hyperduo;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -163,6 +164,13 @@ final class TrioHooks {
 
     /** The status bar's icon container, kept for {@link #resources()}. */
     private static volatile Object sStatusIconContainer;
+    /**
+     * The status bar view itself ({@code MiuiPhoneStatusBarView}), the row the
+     * glyph shares with the clock, the notification icons and the system icons.
+     * Kept so the module can tell the bar's own row from the same views the
+     * keyguard and the control centre inflate - see {@link #isStatusBarHost}.
+     */
+    private static volatile View sStatusBarView;
 
     /** {@code MiuiStatusBatteryContainer}, resolved once. */
     private static volatile Class<?> sBatteryContainerClass;
@@ -686,6 +694,7 @@ final class TrioHooks {
                             syncSlots(icons);
                         }
                         if (self instanceof View) {
+                            sStatusBarView = (View) self;
                             // The only hook callback that runs early enough on a
                             // real SystemUI context. TrioConfig ignores repeat
                             // calls, so this stays a one-shot.
@@ -739,7 +748,41 @@ final class TrioHooks {
                             if (state.outRingInk != ink) {
                                 recolourOutRing(state, ink);
                             }
-                            TrioRenderer.draw((Canvas) canvasArg, host, state);
+                            final Canvas canvas = (Canvas) canvasArg;
+                            // The bar window is only status_bar_height tall and
+                            // clips everything past it. Growing the row inside it
+                            // was tried and abandoned: MIUI's own measure chain
+                            // re-derives the size of every box on the way up, so
+                            // each level fixed exposed the next one. The glyph is
+                            // drawn in a window of its own instead; all that is
+                            // left here is erasing MIUI's own battery drawing so
+                            // the two cannot show at once.
+                            final TrioOverlay overlay = TrioOverlay.active(host, state);
+                            if (overlay != null) {
+                                canvas.drawColor(0, PorterDuff.Mode.CLEAR);
+                                overlay.sync();
+                            } else if (TrioOverlay.windowOwned() && isStatusBarHost(host)) {
+                                // Another view on the bar's own row owns the glyph
+                                // window (MIUI inflates more than one battery view
+                                // there). This one has to stay blank: painting the
+                                // glyph here as well is what put two of them on
+                                // screen, a few pixels apart, whenever the bar was
+                                // laid out again - a dark-mode switch, an app with
+                                // its own bar colour, a configuration change.
+                                //
+                                // Gated on a window actually existing: with the
+                                // switch off there is none, and blanking the row
+                                // here is what made the glyph disappear entirely
+                                // when the window route was turned off.
+                                canvas.drawColor(0, PorterDuff.Mode.CLEAR);
+                            } else {
+                                TrioRenderer.draw(canvas, host, state);
+                            }
+                        } else if (self instanceof View) {
+                            // The master switch is off. Any window this host opened
+                            // earlier has to go with it, or the glyph would keep
+                            // floating above a status bar that is back to stock.
+                            TrioOverlay.release((View) self);
                         }
                         return result;
                     }
@@ -1561,6 +1604,70 @@ final class TrioHooks {
         return null;
     }
 
+    /**
+     * True when {@code host} is the battery view of the status bar's own icon
+     * row: the only container a glyph window may be opened for.
+     *
+     * <p>{@code system_icons.xml} is included by the status bar, the keyguard,
+     * the control centre and both QS headers, so several battery views exist at
+     * once and every one of them gets an {@code onDraw}. Only the status bar's
+     * container is the one this module folds, so only its host may be painted
+     * outside the bar - a second window for any of the others would put a glyph
+     * on screen that the bar's own layout knows nothing about.
+     */
+    static boolean isStatusBarHost(View host) {
+        if (host == null) {
+            return false;
+        }
+        // The row this module owns is the one inside MiuiPhoneStatusBarView. The
+        // keyguard and the control centre inflate the same battery view into
+        // MiuiKeyguardStatusBarView and their own QS headers, and a glyph window
+        // opened for one of those would float over a status bar that knows nothing
+        // about it.
+        //
+        // Matched by walking the parents rather than by comparing root views or
+        // by asking sStatusIconContainer: mStatusBarStatusIcons can point at a
+        // container in another window entirely (it came back with a different root
+        // on consecutive boots), which is exactly how the first window attempt
+        // ended up refusing every host on the bar it was meant for.
+        for (ViewParent p = host.getParent(); p != null;
+             p = (p instanceof View) ? ((View) p).getParent() : null) {
+            final String name = p.getClass().getSimpleName();
+            if (name.contains("Keyguard")) {
+                return false;
+            }
+            if (name.contains("MiuiPhoneStatusBarView")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The nearest {@code MiuiStatusIconContainer} ancestor of {@code host}, or null. */
+    private static Object iconContainerOf(View host) {
+        final Class<?> cls = sIconContainerClass;
+        if (cls == null) {
+            return null;
+        }
+        for (ViewParent p = host.getParent(); p != null;
+             p = (p instanceof View) ? ((View) p).getParent() : null) {
+            if (cls.isInstance(p)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /** The status bar's icon container, or null before the capture hook has run. */
+    static Object statusIconContainer() {
+        return sStatusIconContainer;
+    }
+
+    /** The status bar view itself, or null before the capture hook has run. */
+    static View statusBarView() {
+        return sStatusBarView;
+    }
+
     private static void unregisterHost(View host) {
         synchronized (HOSTS) {
             for (int i = HOSTS.size() - 1; i >= 0; i--) {
@@ -1569,6 +1676,9 @@ final class TrioHooks {
                 }
             }
         }
+        // The glyph window belongs to the host, not to the view tree: it has to
+        // go when the host does, or it would outlive the icon it draws.
+        TrioOverlay.release(host);
     }
 
     /** Repaints every trio host. Signal updates arrive off the UI thread. */

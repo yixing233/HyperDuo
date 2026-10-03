@@ -46,6 +46,33 @@ public final class Prefs {
 
     // ------------------------------------------------------------------ keys
     public static final String KEY_ENABLED = "enabled";
+    /**
+     * Draws the glyph in a window of its own instead of inside the status bar
+     * view - see {@code TrioOverlay}.
+     *
+     * <p>The status bar window is only {@code status_bar_height} tall (121px,
+     * about 43dp, on this device) and clips everything past that rectangle, so a
+     * glyph that wants more height than the bar has can never be drawn whole in
+     * the bar, whatever the view tree does.
+     *
+     * <p>On by default, and the only route that draws the glyph whole: growing
+     * the status bar's own row to make room was tried and abandoned - MIUI's
+     * measure chain re-derives the size of every box on the way up, so each level
+     * fixed exposed the next one, and the window's own height was taken back by
+     * MIUI's controller on its own schedule. The cost of this route is placement:
+     * the screen's top edge is hard, so a glyph taller than the bar sits a few dp
+     * below the icons beside it instead of on their centre line.
+     */
+    /**
+     * Stored under a name that did not exist while this route was the fallback.
+     *
+     * <p>The earlier default (off) was written into the framework's remote
+     * preferences by the settings app on first open, and a stored value wins over
+     * any new default - an install that has it would keep the window route off no
+     * matter what {@link #DEF_OVERLAY} says. The framework does no type conversion
+     * and never forgets a key, so the new route gets a key with no history.
+     */
+    public static final String KEY_OVERLAY = "glyph_window";
     public static final String KEY_SHOW_WIFI = "show_wifi";
     public static final String KEY_SHOW_MOBILE = "show_mobile";
     public static final String KEY_SHOW_VALUE = "show_value";
@@ -258,6 +285,7 @@ public final class Prefs {
 
     // -------------------------------------------------------------- defaults
     public static final boolean DEF_ENABLED = true;
+    public static final boolean DEF_OVERLAY = true;
     public static final boolean DEF_SHOW_WIFI = true;
     public static final boolean DEF_SHOW_MOBILE = true;
     public static final boolean DEF_SHOW_VALUE = true;
