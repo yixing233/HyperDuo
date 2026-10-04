@@ -50,3 +50,22 @@ Earlier variants did not fix the problem; full-reboot verification preceded the
 final charging-island changes. Cross-ROM compatibility, rotation and exhaustive
 mode transitions still require device testing. No raw device logs, screenshots,
 or decompiled platform source are included.
+
+## Historical device screenshots
+
+These are existing status-bar-only contact sheets captured during **test4** mode
+validation, before the anchor fix in test5 and the island behavior change in
+test6. They document the overlap that led to the later fix, NOT final test6
+appearance or a claim that every mode passed. `signal2` means out-of-ring signal
+with custom stacked signal enabled; `type2` means out-of-ring network type.
+
+### Ring modes (test4, before anchor fix)
+
+![test4 ring modes; fourth row reproduces type/signal overlap](issue9-images/test4-ring-modes.png)
+
+### Rectangular modes and module disabled (test4, before anchor fix)
+
+![test4 rectangular modes; third row reproduces overlap, last two rows show module disabled](issue9-images/test4-rect-modes.png)
+
+The user's final test6 charging-island confirmation was textual; these historical
+images must not be presented as a screenshot of that final confirmation.
