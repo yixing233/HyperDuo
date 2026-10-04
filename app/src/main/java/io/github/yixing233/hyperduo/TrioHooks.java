@@ -322,6 +322,7 @@ final class TrioHooks {
         hooked += group(module, cl, 8);
         hooked += group(module, cl, 9);
         hooked += group(module, cl, 10);
+        hooked += group(module, cl, 11);
         log(module, "HyperDuo installed, hooks=" + hooked
                 + " enabled=" + TrioConfig.get().enabled);
     }
@@ -432,6 +433,7 @@ final class TrioHooks {
         // show_bolt / show_value, and the percentage container follows the master
         // switch.
         applyMeterText(meters);
+        replayBatteryIslandRequests();
     }
 
     /**
@@ -680,6 +682,7 @@ final class TrioHooks {
                 case 8: return hookMobileTypeVisibility(module, cl);
                 case 9: return hookMeterTint(module, cl);
                 case 10: return hookIslandHide(module, cl);
+                case 11: return hookMobileTypeDraw(module, cl);
                 default: return 0;
             }
         } catch (Throwable t) {
@@ -1084,8 +1087,9 @@ final class TrioHooks {
      * Turns MIUI's own "show the network type" requests into "hide it" while the
      * module draws the type itself.
      *
-     * <p>{@code MobileSignalAnimatorContainer.setChildVisible(View, boolean)} is
-     * the one door every native type-show walks through:
+     * <p>{@code MobileSignalAnimatorContainer.setChildVisible(View, boolean)}
+     * handles the standalone type and signal group. The classic ImageView's
+     * direct visibility flow bypasses it; see {@link #hookMobileTypeDraw}.
      * {@code MiuiMobileIconBinder} collects a {@code mobileTypeSingleVisible}
      * flow and calls it for both the HyperOS {@code mobile_type_single} TextView
      * and the classic {@code mobile_signal_container} group. Flipping the
@@ -1101,8 +1105,9 @@ final class TrioHooks {
      * {@code status_bar_view_state_tag}. The id check is cheap enough per call:
      * one memoised map look-up.
      *
-     * <p>Only the {@code true} requests are touched, and only while the module
-     * is drawing the type itself (out of ring). Every other call proceeds
+     * <p>Both show and hide requests are suppressed without a disappearance
+     * clone while the enabled module draws the type itself (out of ring).
+     * Every other call proceeds
      * unchanged, so a firmware rename or an unexpected caller costs nothing.
      */
     private static int hookMobileTypeVisibility(XposedModule module, ClassLoader cl) {
@@ -1117,41 +1122,105 @@ final class TrioHooks {
                 "hyperduo-mobile-type-visible", new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                        if (TrioConfig.appearance().typeOutOfRing) {
+                        final TrioAppearance a = TrioConfig.appearance();
+                        if (a.glyph && a.typeOutOfRing) {
                             final Object arg0 = chain.getArg(0);
-                            final Object arg1 = chain.getArg(1);
-                            if (Boolean.TRUE.equals(arg1)
-                                    && arg0 instanceof View
+                            if (arg0 instanceof View
                                     && isNativeTypeView((View) arg0)) {
-                                // proceed(Object[]) replaces the arguments for
-                                // the intercepted call; the appear path never
-                                // runs, so no transient copy is made either.
+                                // A false request on a VISIBLE target can clone
+                                // it into a transient disappearance view. Make
+                                // it invisible first; still proceed so MIUI
+                                // removes/cancels any existing fakeViews entry.
+                                prepareNativeTypeHide((View) arg0);
                                 return chain.proceed(new Object[]{arg0, Boolean.FALSE});
                             }
                         }
-                        return chain.proceed();
+                        final Object result = chain.proceed();
+                        return result;
                     }
                 });
     }
 
+    private static void prepareNativeTypeHide(View view) {
+        if (view.getVisibility() == View.VISIBLE) {
+            markCollapsed(view);
+            view.setVisibility(View.INVISIBLE);
+        }
+    }
+
     /**
-     * Tracks the charging super island hiding the battery.
-     *
-     * <p>{@code MiuiBatteryMeterView.updateIslandChanged} - the one callee MIUI
-     * drives when the island appears or disappears - lands in
-     * {@code MiuiStatusBatteryContainer.setIsHideBattery(boolean)} plus a
-     * requestLayout. Hooking that setter is the narrowest point that sees both
-     * directions with the value MIUI actually settled on, for every container
-     * (each has its own battery meter and its own setter, and they all carry
-     * the same value).
-     *
-     * <p>The flag flips three rules at once - the glyph stops painting, the
-     * Wi-Fi slot is handed back, and the out-of-ring reading takes over - so
-     * the reaction after recording is one re-fold of every claimed container
-     * plus a resync of both out-of-ring views, the same round
-     * {@code applyConfigChange} runs for a settings change. Posted: the setter
-     * itself runs before a layout, and the reaction adds no view from inside
-     * one.
+     * The classic mobile_type ImageView is re-shown directly by the binder's
+     * mobileTypeVisible flow, bypassing setChildVisible. Its drawable paints
+     * text without consulting its bounds, so collapsing the slot to 0x0 does
+     * not prevent drawing through MIUI's clipChildren=false ancestors.
+     * Gate only this dedicated type drawable, not View.draw or all ImageViews.
+     * Sampling/measurement stays intact for the module's replacement label.
+     */
+    private static int hookMobileTypeDraw(XposedModule module, ClassLoader cl) {
+        final Class<?> drawable = Refl.cls(
+                "com.miui.systemui.statusbar.views.MobileTypeDrawable", cl);
+        return hook(module, Refl.method(drawable, "draw", Canvas.class),
+                "hyperduo-mobile-type-draw", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        return drawNativeType(chain);
+                    }
+                });
+    }
+
+    private static boolean sNativeTypeDrawLogged;
+
+    private static Object drawNativeType(XposedInterface.Chain chain) throws Throwable {
+        final TrioAppearance a = TrioConfig.appearance();
+        if (a.glyph && a.typeOutOfRing) {
+            if (debugLog() && !sNativeTypeDrawLogged) {
+                sNativeTypeDrawLogged = true;
+                log(LOG_INFO, "native type draw suppressed: MobileTypeDrawable");
+            }
+            return null;
+        }
+        return chain.proceed();
+    }
+
+    // Preserve the controller's real request so disabling the module during an
+    // active island restores stock behavior, rather than waiting for a new event.
+    private static final Map<Object, boolean[]> BATTERY_ISLAND_REQUESTS =
+            new WeakHashMap<Object, boolean[]>();
+
+    private static Object keepBatteryDuringIsland(XposedInterface.Chain chain) throws Throwable {
+        final boolean requested = Boolean.TRUE.equals(chain.getArg(0));
+        final boolean trigger = Boolean.TRUE.equals(chain.getArg(1));
+        synchronized (BATTERY_ISLAND_REQUESTS) {
+            BATTERY_ISLAND_REQUESTS.put(chain.getThisObject(), new boolean[]{requested, trigger});
+        }
+        // Change only the meter's battery replacement state. The island window
+        // and its normal clearance/translation remain controlled by SystemUI.
+        final Object result = chain.proceed(new Object[]{
+                Boolean.valueOf(requested && !TrioConfig.get().enabled),
+                Boolean.valueOf(trigger)});
+        final Object meter = chain.getThisObject();
+        Refl.set(Refl.field(meter.getClass(), "mStoreIsAddBatteryIsland"), meter,
+                Boolean.valueOf(requested));
+        return result;
+    }
+
+    private static void replayBatteryIslandRequests() {
+        final Map<Object, boolean[]> requests;
+        synchronized (BATTERY_ISLAND_REQUESTS) {
+            requests = new HashMap<Object, boolean[]>(BATTERY_ISLAND_REQUESTS);
+        }
+        for (Map.Entry<Object, boolean[]> entry : requests.entrySet()) {
+            final boolean[] args = entry.getValue();
+            Refl.callArgs(entry.getKey(), "updateIslandChanged",
+                    new Class<?>[]{boolean.class, boolean.class},
+                    new Object[]{Boolean.valueOf(args[0]), Boolean.valueOf(args[1])});
+        }
+    }
+
+    /**
+     * Keep the battery replacement flag off while the module owns the glyph.
+     * Retain the container observer for stock behavior and compatibility when
+     * the meter hook is unavailable; island window positioning is not changed.
      */
     private static int hookIslandHide(XposedModule module, ClassLoader cl) {
         final Class<?> container = Refl.cls(
@@ -1160,7 +1229,17 @@ final class TrioHooks {
             log(module, "MiuiStatusBatteryContainer missing");
             return 0;
         }
-        return hook(module, Refl.method(container, "setIsHideBattery", Boolean.class),
+        final Class<?> meter = Refl.cls(
+                "com.android.systemui.statusbar.views.MiuiBatteryMeterView", cl);
+        final int keep = hook(module, Refl.method(meter, "updateIslandChanged",
+                boolean.class, boolean.class), "hyperduo-keep-island-battery",
+                new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        return keepBatteryDuringIsland(chain);
+                    }
+                });
+        return keep + hook(module, Refl.method(container, "setIsHideBattery", Boolean.class),
                 "hyperduo-island-hide", new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
@@ -1505,7 +1584,8 @@ final class TrioHooks {
      * layout per pass.
      */
     private static void suppressNativeTypeViews(ViewGroup container) {
-        final boolean suppress = TrioConfig.appearance().typeOutOfRing;
+        final TrioAppearance a = TrioConfig.appearance();
+        final boolean suppress = a.glyph && a.typeOutOfRing;
         final android.content.res.Resources res = resources();
         if (res == null) {
             return;
@@ -2141,7 +2221,12 @@ final class TrioHooks {
         if (container == null) {
             return;
         }
-        syncSlots(Refl.get(sStatusIconField, container));
+        // The first icon-container layout can precede the host's first draw.
+        // Its slots may already be ignored, so syncSlots alone need not request
+        // another layout. Apply the same immediate suppression as a config
+        // reload rather than waiting for a layout that may never happen.
+        // Callers run in posted work, outside the draw/layout traversal.
+        foldAndSettle(Refl.get(sStatusIconField, container));
     }
 
     // ------------------------------------------------- out-of-ring type label
@@ -2617,7 +2702,10 @@ final class TrioHooks {
         // reserveOutRingStrip's padding ends, so the views land inside the strip
         // they reserved rather than across the icons.
         final View icons = iconContainerIn(container);
-        final boolean useIcons = icons != null && icons.getWidth() > 0;
+        // A label anchored to our signal must follow that signal, not restart
+        // at the row edge. Both views receive the same island translation below.
+        final boolean useIcons = !(anchor instanceof OutSignalView)
+                && icons != null && icons.getWidth() > 0;
         final int edge = rtl
                 ? (useIcons ? icons.getLeft() : anchor.getRight())
                 : (useIcons ? icons.getRight() : anchor.getLeft());
