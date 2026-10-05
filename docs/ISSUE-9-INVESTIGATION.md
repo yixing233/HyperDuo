@@ -43,7 +43,7 @@ Android instrumentation tests. Generated files stay in ignored `work/issue9`.
 | Issue #9 after SystemUI restart and full device reboot | Verified during device iteration |
 | Final charging-island appearance | User confirmed on test6 |
 | All mode combinations on final build | Not completed |
-| Final cleaned build installed on device | Not performed; diagnostic removal only after test6 |
+| Final cleaned test6 installed on device | Reinstalled; user confirmed normal runtime and functionality |
 
 Device validation used the Xiaomi 17 Pro Max / HyperOS 4 ROM reported in #9.
 Earlier variants did not fix the problem; full-reboot verification preceded the
@@ -51,21 +51,15 @@ final charging-island changes. Cross-ROM compatibility, rotation and exhaustive
 mode transitions still require device testing. No raw device logs, screenshots,
 or decompiled platform source are included.
 
-## Historical device screenshots
+## Final test6 charging-island screenshot
 
-These are existing status-bar-only contact sheets captured during **test4** mode
-validation, before the anchor fix in test5 and the island behavior change in
-test6. They document the overlap that led to the later fix, NOT final test6
-appearance or a claim that every mode passed. `signal2` means out-of-ring signal
-with custom stacked signal enabled; `type2` means out-of-ring network type.
+The user supplied this cropped device screenshot after confirming normal runtime
+and functionality on the reinstalled, diagnostics-cleaned test6 build. It shows
+the charging island alongside the complete HyperDuo battery glyph, with the 5G
+label visibly separated from the glyph. The image is included unchanged.
 
-### Ring modes (test4, before anchor fix)
+![test6 charging island with complete HyperDuo glyph](issue9-images/test6-charging-island.jpg)
 
-![test4 ring modes; fourth row reproduces type/signal overlap](issue9-images/test4-ring-modes.png)
-
-### Rectangular modes and module disabled (test4, before anchor fix)
-
-![test4 rectangular modes; third row reproduces overlap, last two rows show module disabled](issue9-images/test4-rect-modes.png)
-
-The user's final test6 charging-island confirmation was textual; these historical
-images must not be presented as a screenshot of that final confirmation.
+This is evidence for the pictured charging-island state, not an exhaustive
+mode-transition, rotation or cross-ROM test. Earlier test4 contact sheets remain
+in Git history but are replaced here to avoid confusing them with final results.
