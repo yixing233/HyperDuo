@@ -2880,7 +2880,7 @@ final class TrioHooks {
         // Only a guard: inkScale() is 0 exactly when the host has no measured
         // size, and the label cannot be positioned against an unmeasured meter.
         // The text size no longer comes from the ink scale at all - it is the
-        // user's own Out-of-ring size, already in screen pixels.
+        // user's own Out-of-ring dp size resolved against display density.
         if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
             return;
         }
@@ -2897,7 +2897,7 @@ final class TrioHooks {
         if (label.getVisibility() != View.VISIBLE
                 || !text.contentEquals(label.getText())
                 || label.suffixScale != TrioConfig.appearance().typeSuffixScale
-                || label.getTextSize() != TrioConfig.get().outTypeSize) {
+                || label.getTextSize() != outTypeSizePx(container)) {
             requestOutTypeSync(container);
             return;
         }
@@ -3107,10 +3107,10 @@ final class TrioHooks {
         // Its own setting, not the in-ring type_size: that one is authored for
         // the ring canvas' 120x120 design space and comes out far too small
         // once the label stands in the status bar's real pixel space.
-        final float size = a.outTypeSize;
+        final float size = outTypeSizePx(container);
         if (label.getTextSize() != size) {
             // PX, not the SP that the one-argument overload would use: the
-            // status bar lays out in raw pixels, so the value is applied as-is
+            // status bar lays out in raw pixels, so the dp value is resolved against display density
             // rather than scaled by the user's font-size setting.
             label.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
         }
@@ -3738,6 +3738,12 @@ final class TrioHooks {
      * height at rest and at the full {@code statusBars} inset once the control
      * centre is pulled down, so a size derived from the row grew with the shade.
      */
+    /** Resolve the stored dp size once into the PX used by TextView and layout. */
+    private static float outTypeSizePx(View container) {
+        final float density = container.getResources().getDisplayMetrics().density;
+        return TrioConfig.appearance().outTypeSize * density;
+    }
+
     private static int outSignalHeight(View host) {
         final float density = host.getResources().getDisplayMetrics().density;
         return TrioRenderer.outSignalHeight(TrioConfig.appearance().outSignalSize, density);
