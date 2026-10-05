@@ -2112,25 +2112,9 @@ final class TrioHooks {
                 if (child == null || !"wifi".equals(slotOf(child))) {
                     continue;
                 }
-                // Two independent witnesses, either of which says "connected":
-                //
-                // 1. isIconVisible() - the binding-driven answer MIUI itself
-                //    uses. Honest on the tested HyperOS 4 build, but observed
-                //    returning false on a 4.0.0.28 beta while the Wi-Fi was in
-                //    fact connected (issue #5: no arcs drawn, and the native
-                //    icon - which appears the moment the arcs are switched off,
-                //    proving the fold was fine) - so this witness alone is not
-                //    enough.
-                // 2. a sampled level - transformResId only runs while MIUI is
-                //    really binding a Wi-Fi icon, so sWifiLevel >= 0 means the
-                //    radio has answered at least once this boot. It never
-                //    resets to -1 on its own, which makes it a poor "went away"
-                //    witness but an excellent "was here" one.
-                //
-                // The OR is what keeps a firmware quirk from blanking the arcs:
-                // isIconVisible() alone lost that race. The fallback to mere
-                // presence below stays for a firmware where even the method is
-                // missing.
+                // Binding visibility is only a fallback when framework
+                // connectivity is unavailable. Never treat historical signal
+                // levels as proof of a current connection (issues #13/#14).
                 final Object visible = Refl.callByName(child, "isIconVisible");
                 if (!(visible instanceof Boolean) || ((Boolean) visible).booleanValue()) {
                     wifiVisible = true;
@@ -2140,14 +2124,8 @@ final class TrioHooks {
         } catch (Throwable ignored) {
             // keep the previous state
         }
-        if (!wifiVisible && TrioState.sWifiLevel >= 0) {
-            // A level has been sampled but this pass says "absent": trust the
-            // level. The one state this misreads is Wi-Fi genuinely turned off
-            // - and there the drawn level would linger - which is why the
-            // clear icon still wins: C_CLEAR drives the level itself, and the
-            // native icon's return is what the arcs-off switch shows.
-            wifiVisible = true;
-        }
+        // Live framework connectivity wins over a stale sampled icon level.
+        wifiVisible = WifiPresence.resolve(wifiVisible, TrioState.sWifiLevel);
         if (TrioState.setWifiPresent(wifiVisible)) {
             invalidateHosts();
         }

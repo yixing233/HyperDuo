@@ -265,6 +265,7 @@ final class TrioState {
         try {
             final Context app = context.getApplicationContext();
             sContext = (app != null) ? app : context;
+            WifiPresence.start(sContext);
         } catch (Throwable ignored) {
             // leave it null; the reading stays on the single-row fallback
         }
@@ -509,6 +510,7 @@ final class TrioState {
      * change lets the caller redraw only on the edge, not on every layout pass.
      */
     static boolean setWifiPresent(boolean present) {
+        present = WifiPresence.resolve(present, -1);
         if (sWifiPresent == present) {
             return false;
         }
