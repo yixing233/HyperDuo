@@ -63,3 +63,14 @@ label visibly separated from the glyph. The image is included unchanged.
 This is evidence for the pictured charging-island state, not an exhaustive
 mode-transition, rotation or cross-ROM test. Earlier test4 contact sheets remain
 in Git history but are replaced here to avoid confusing them with final results.
+
+## Historical mode-combination tests (test4)
+
+These supplementary images retain the earlier ring/rectangular and disabled-mode
+checks. They predate the test5 anchor correction and test6 island behavior, so
+visible overlap in these images is historical, not the final result. They do
+not establish that all combinations passed on the final build.
+
+![Historical test4 ring combinations](issue9-images/test4-ring-modes.png)
+
+![Historical test4 rectangular and disabled combinations](issue9-images/test4-rect-modes.png)
