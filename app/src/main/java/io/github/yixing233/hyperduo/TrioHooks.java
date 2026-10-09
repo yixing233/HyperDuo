@@ -2202,6 +2202,11 @@ final class TrioHooks {
                 }
             }
         }
+        // The strip this module reserves is what pushes the native icons out of
+        // the row, and MIUI's own overflow pass does not act on it - see
+        // hideOverflowingIcons. Applied here, after the container has finished
+        // positioning its children.
+        hideOverflowingIcons(container);
         if (relayout) {
             container.requestLayout();
         }
@@ -3693,6 +3698,66 @@ final class TrioHooks {
             log(LOG_INFO, "out type: reserved " + reserve + "px, icon padding "
                     + saved[0] + "/" + saved[1] + " -> " + left + "/" + right
                     + ", icons w=" + icons.getWidth());
+        }
+    }
+
+    /**
+     * Hides the native icons the reserved strip has pushed out of the container.
+     *
+     * <p>MIUI is supposed to do this itself: its own onLayout walks the row and
+     * marks whatever no longer fits as hidden. On this build that walk does
+     * nothing - the value it accumulates is never stored back, so the test that
+     * hides a child never fires - and with the strip reserved the icons simply
+     * pile up on each other. That is the overlap, and it happens with or without
+     * the island.
+     *
+     * <p>Only the native icons are touched: the slots this module draws itself
+     * are skipped, and the battery is not in this container to begin with.
+     */
+    private static void hideOverflowingIcons(ViewGroup container) {
+        final int[] saved = OUT_PAD_SAVED.get(container);
+        if (saved == null) {
+            return;
+        }
+        final int reserve = container.getPaddingRight() - saved[1];
+        if (reserve <= 0) {
+            return;
+        }
+        final int limit = container.getWidth() - reserve;
+        final int count = container.getChildCount();
+        for (int i = 0; i < count; i++) {
+            final View child;
+            try {
+                child = container.getChildAt(i);
+            } catch (Throwable t) {
+                continue;
+            }
+            if (child == null) {
+                continue;
+            }
+            final String slot = slotOf(child);
+            if (slot == null || MANAGED_SLOTS.contains(slot)) {
+                continue;
+            }
+            if (child.getRight() <= limit) {
+                if (unmarkCollapsed(child)) {
+                    try {
+                        if (child.getVisibility() != View.VISIBLE) {
+                            child.setVisibility(View.VISIBLE);
+                        }
+                    } catch (Throwable ignored) {
+                        // never let one child abort the pass
+                    }
+                }
+                continue;
+            }
+            if (child.getVisibility() != View.GONE && markCollapsed(child)) {
+                try {
+                    child.setVisibility(View.GONE);
+                } catch (Throwable ignored) {
+                    // never let one child abort the pass
+                }
+            }
         }
     }
 
