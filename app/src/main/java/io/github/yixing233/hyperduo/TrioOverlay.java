@@ -227,6 +227,9 @@ final class TrioOverlay {
 
     private static int sWindowType;
 
+    /** PRIVATE_FLAG_TRUSTED_OVERLAY, or 0 on a build that has no such flag. */
+    private static int sTrustedOverlay;
+
     /**
      * The one host whose window is live.
      *
@@ -305,6 +308,19 @@ final class TrioOverlay {
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        // Marked trusted so the platform does not read this window as a
+        // tap-jacking overlay - see trustedOverlayFlag(). privateFlags is a
+        // hidden field, so it is set reflectively like the flag itself.
+        final int trusted = trustedOverlayFlag();
+        if (trusted != 0) {
+            try {
+                final Field field = WindowManager.LayoutParams.class
+                        .getField("privateFlags");
+                field.setInt(params, field.getInt(params) | trusted);
+            } catch (Throwable ignored) {
+                // Hidden field: nothing to mark on this build.
+            }
+        }
         params.setTitle(TITLE);
         params.alpha = 1f;
         params.windowAnimations = 0;
@@ -523,6 +539,54 @@ final class TrioOverlay {
     }
 
     /**
+     * Repaints every live glyph window.
+     *
+     * <p>The window only repaints when something invalidates it, and while it is
+     * up the bar's own view draws nothing - this module clears it - so a change
+     * that reaches only the tint never repaints the glyph: the bar is re-tinted,
+     * its own view is not redrawn because the module owns the pixels, and
+     * sync() - which is the call that invalidates this view - is not run either.
+     * The glyph then keeps the ink of the background it was last drawn on, which
+     * is a white glyph on a light bar.
+     *
+     * <p>The tint hooks call this as the bar's ink changes, so the glyph follows
+     * it. Invalidating a view that is already up to date costs nothing, so this
+     * does not need to know whether anything really moved.
+     */
+    static void redrawAll() {
+        for (TrioOverlay overlay : LIVE.values()) {
+            try {
+                overlay.redraw();
+            } catch (Throwable ignored) {
+                // A host that went away mid-pass is not this call's problem.
+            }
+        }
+    }
+
+    /** Invalidates this window's view. UI thread only. */
+    private void redraw() {
+        glyph.invalidate();
+    }
+
+    /**
+     * Files {@code colour} as the ink of every live host's row.
+     *
+     * <p>The caller is the hook on the icon tint: it knows the colour the bar is
+     * painting its own icons in, but it cannot name the row, because the icon it
+     * hooks sits in the icon container rather than in a battery container. The
+     * rows these windows serve are the ones to file it against.
+     */
+    static void fileInk(int colour) {
+        for (View host : LIVE.keySet()) {
+            try {
+                TrioHooks.fileRowInk(TrioHooks.rowOf(host), colour);
+            } catch (Throwable ignored) {
+                // A host that went away mid-pass is not this call's problem.
+            }
+        }
+    }
+
+    /**
      * Follows the host: same visibility, same centre, and a repaint whenever the
      * host repaints. Runs inside the host's draw pass, so nothing here may
      * schedule layout on the host.
@@ -725,6 +789,32 @@ final class TrioOverlay {
             sWindowType = type;
         }
         return sWindowType;
+    }
+
+    /**
+     * {@code PRIVATE_FLAG_TRUSTED_OVERLAY}, read reflectively because it is a
+     * hidden constant, or {@code 0} on a build that does not have it.
+     *
+     * <p>Without the mark the platform treats a window drawn over an app as a
+     * possible tap-jacking attempt: a touch that lands under it is flagged as
+     * obscured, and an app that checks for that - a module manager, say -
+     * refuses to act on it. This window is not that kind of overlay. It is not
+     * touchable, it is one icon wide and sits in the bar, and it belongs to the
+     * system UI.
+     */
+    private static int trustedOverlayFlag() {
+        if (sTrustedOverlay == 0) {
+            int flag = 0;
+            try {
+                final Field field = WindowManager.LayoutParams.class
+                        .getField("PRIVATE_FLAG_TRUSTED_OVERLAY");
+                flag = field.getInt(null);
+            } catch (Throwable ignored) {
+                // Older platform: there is no such mark to set.
+            }
+            sTrustedOverlay = flag;
+        }
+        return sTrustedOverlay;
     }
 
     /** The glyph itself: the same drawing call the hooked view used to make. */

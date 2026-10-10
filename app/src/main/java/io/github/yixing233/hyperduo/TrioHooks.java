@@ -22,6 +22,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -298,7 +299,50 @@ final class TrioHooks {
      * it cannot reach back and keep its own key alive.
      */
     private static final Map<View, int[]> OUT_PAD_SAVED =
-            Collections.synchronizedMap(new WeakHashMap<View, int[]>());
+            Collections.synchronizedMap(new HashMap<View, int[]>());
+
+    /** Bounded diagnostic counter for the overflow pass. */
+    private static int sHideDiag = 0;
+
+    /** Bounded diagnostic counter for the ownership check. */
+    private static int sOwnedDiag = 0;
+
+    /** Bounded counter for the overflow entry log. */
+    private static int sDiagHideEntry = 0;
+
+    /** Last decision logged per row, so the log fires on change only. */
+    private static final Map<View, String> LAST_DECISION =
+            Collections.synchronizedMap(new WeakHashMap<View, String>());
+
+    /**
+     * The last non-zero strip measured per row.
+     *
+     * <p>The reading is torn down and re-mounted whenever MIUI rearranges the
+     * bar - a super island appearing does exactly that - and for the layout
+     * passes in between there is nothing to measure. Reading zero then collapses
+     * the boundary back to the row's own edge and hands the last icon its place
+     * back, which is how the overlap returned after it had been fixed. A
+     * remembered width bridges that gap; when the reading is gone for good,
+     * nothing refreshes the entry and it ages out with the row.
+     */
+    /**
+     * The width each child last measured at.
+     *
+     * <p>A child this pass hid is gone from the layout, so asking it for its
+     * width afterwards answers zero - and a zero width would drop it out of the
+     * running total the pass stacks up, which is what let the row empty itself
+     * one icon per pass. The remembered width keeps every hidden child in the
+     * sum it belongs to.
+     */
+    /** The left edge each child was last drawn at, in the row's parent. */
+    private static final Map<View, Integer> LAST_LEFT =
+            Collections.synchronizedMap(new WeakHashMap<View, Integer>());
+
+    private static final Map<View, Integer> LAST_WIDTH =
+            Collections.synchronizedMap(new WeakHashMap<View, Integer>());
+
+    private static final Map<View, Integer> LAST_STRIP =
+            Collections.synchronizedMap(new WeakHashMap<View, Integer>());
 
     /** Hard cap on total child dumps, so a layout loop cannot flood the log. */
     private static volatile int sDiagDumps;
@@ -1487,7 +1531,7 @@ final class TrioHooks {
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
                         final Object result = chain.proceed();
                         final Object self = chain.getThisObject();
-                        if (self instanceof View && TrioConfig.appearance().typeAnywhere()) {
+                        if (self instanceof View) {
                             // Signature: (areas, intensity, tintColor, light, dark,
                             // useTint). Resolve the ink exactly the way
                             // TrioState.foreground() resolves it from the very
@@ -1516,10 +1560,18 @@ final class TrioHooks {
                             }
                             final View v = (View) self;
                             final Object owner = batteryContainerOf(v);
-                            if (owner instanceof ViewGroup) {
+                            if (owner instanceof View) {
+                                ROW_INK.put((View) owner, ink);
+                            }
+                            if (owner instanceof ViewGroup
+                                    && TrioConfig.appearance().typeAnywhere()) {
                                 applyOutRingInk((ViewGroup) owner, ink);
                             }
                         }
+                        // Same reason as the icon-tint hook: this is the bar
+                        // being told what to draw on, and the glyph lives in a
+                        // window this module clears the bar's own view out of.
+                        TrioOverlay.redrawAll();
                         return result;
                     }
                 });
@@ -1765,6 +1817,22 @@ final class TrioHooks {
     }
 
     /**
+     * Files {@code colour} as the ink of {@code row}.
+     *
+     * <p>Called with the colour SystemUI is painting its own icons in. The
+     * caller cannot name the row itself: a status bar icon sits in the icon
+     * container, not in a battery container, so walking up from the icon finds
+     * nothing and the colour would be dropped on the floor - which is what kept
+     * a row tinted while the bar was dark at that ink after the background
+     * changed.
+     */
+    static void fileRowInk(View row, int colour) {
+        if (row != null && colour != 0) {
+            ROW_INK.put(row, colour);
+        }
+    }
+
+    /**
      * Hears the colour SystemUI paints its own icons in.
      *
      * <p>The tint fields the colour rule reads are set when the bar is built and
@@ -1810,6 +1878,17 @@ final class TrioHooks {
                         ROW_INK.put(row, colour);
                     }
                 }
+                // The bar has just been re-tinted, and while the glyph is in a
+                // window of its own nothing else repaints it: the bar's own view
+                // is cleared by this module and does not draw the glyph, so a
+                // tint change would otherwise leave the window showing the ink
+                // of whatever background it was last drawn on.
+                // The icon carrying this colour sits in the icon container, so
+                // walking up from it finds no row and the colour would be
+                // dropped. File it against the rows this module draws for, which
+                // is what lets a re-tint reach the glyph at all.
+                TrioOverlay.fileInk(colour);
+                TrioOverlay.redrawAll();
                 return result;
             }
         };
@@ -2035,6 +2114,38 @@ final class TrioHooks {
     }
 
     /** True when {@code view} sits inside the keyguard's own status bar row. */
+    /**
+     * True when {@code view} sits in the bar's own window rather than in the
+     * shade. The overflow pass is safe for both rows of the bar - the status bar
+     * and the lock screen's - but not for the copies the shade keeps, which are
+     * laid out for the expanded panel and are none of this module's business.
+     */
+    /**
+     * How far MIUI has slid the native icon row inward because of the super
+     * island, in pixels, or 0 when no island is up.
+     *
+     * <p>{@code MiuiStatusIconContainer.onLayout} reads this back from its own
+     * island monitor and moves every child that falls inside the island's span
+     * out of the way. It only ever moves its own children - the out-of-ring
+     * reading is this module's view, so nothing moves it - and the reading then
+     * ends up drawn underneath the island while the native icons beside it have
+     * already stepped aside. Reading the same number is what lets the reading
+     * step aside with them.
+     */
+    private static boolean isStatusBarRow(View view) {
+        for (ViewParent p = view.getParent(); p != null;
+             p = (p instanceof View) ? ((View) p).getParent() : null) {
+            final String name = p.getClass().getSimpleName();
+            if (name.contains("StatusBarWindowView")) {
+                return true;
+            }
+            if (name.contains("NotificationShadeWindowView")) {
+                return false;
+            }
+        }
+        return false;
+    }
+
     private static boolean isKeyguardRow(View view) {
         for (ViewParent p = view.getParent(); p != null;
              p = (p instanceof View) ? ((View) p).getParent() : null) {
@@ -2126,6 +2237,15 @@ final class TrioHooks {
         final boolean owned = isOwned(container);
         diagnose(container, owned);
         if (!owned) {
+            // The overlap this pass removes is MIUI's own doing - its overflow
+            // walk never stores the width it accumulates, so it never hides
+            // anything - and that happens in every row, including the ones the
+            // module is not drawing a glyph into. Those rows are still the
+            // bar's; the shade keeps its own copies of the same layout, and
+            // those are left alone.
+            if (isStatusBarRow(container)) {
+                hideOverflowingIcons(container);
+            }
             noteSkipped(container);
             return;
         }
@@ -2202,6 +2322,11 @@ final class TrioHooks {
                 }
             }
         }
+        // The strip this module reserves is what pushes the native icons out of
+        // the row, and MIUI's own overflow pass does not act on it - see
+        // hideOverflowingIcons. Applied here, after the container has finished
+        // positioning its children.
+        hideOverflowingIcons(container);
         if (relayout) {
             container.requestLayout();
         }
@@ -2482,6 +2607,27 @@ final class TrioHooks {
             return false;
         }
         final View owner = batteryContainerOf((View) container);
+        if (sOwnedDiag < 200) {
+            sOwnedDiag++;
+            String decl;
+            try {
+                final Object d = (owner == null) ? null : Refl.get(sStatusIconField, owner);
+                decl = (d == null) ? "null" : ((d == container) ? "same" : d.getClass().getSimpleName());
+            } catch (Throwable t) {
+                decl = "err:" + t.getClass().getSimpleName();
+            }
+            String live;
+            try {
+                live = String.valueOf(owner != null && holdsLiveHost(owner));
+            } catch (Throwable t) {
+                live = "err:" + t.getClass().getSimpleName();
+            }
+            log(LOG_INFO, "isOwned: c=" + container.getClass().getSimpleName()
+                    + " owner=" + (owner == null ? "null" : owner.getClass().getSimpleName())
+                    + " decl=" + decl + " live=" + live
+                    + " kg=" + isKeyguardRow((View) container)
+                    + " fieldNull=" + (sStatusIconField == null));
+        }
         if (owner == null) {
             return false;
         }
@@ -3637,9 +3783,34 @@ final class TrioHooks {
             if (width == null) {
                 return 0;
             }
+            // The container's own translation first: that is the number it laid
+            // the row out with, and it is what the native icons beside the
+            // reading actually moved by. The monitor's width is a different
+            // quantity - how much of the row the island occupies - and it is far
+            // larger than the shift on this build, so using it as the shift
+            // pushes the reading clean off the bar instead of beside the island.
+            final Method used = Refl.method(iconContainer.getClass(), "getIslandTranslationX");
+            if (used != null) {
+                final Object shift = Refl.invoke(used, iconContainer);
+                if (shift instanceof Integer) {
+                    final int sx = ((Integer) shift).intValue();
+                    if (sx > 0) {
+                        return sx;
+                    }
+                }
+                if (shift instanceof Float) {
+                    final int sx = ((Float) shift).intValue();
+                    if (sx > 0) {
+                        return sx;
+                    }
+                }
+            }
             final Object value = Refl.invoke(width, monitor);
             final int px = (value instanceof Integer) ? (Integer) value : 0;
-            return (px > 0) ? px : 0;
+            if (px > 0) {
+                return px;
+            }
+            return 0;
         } catch (Throwable ignored) {
             // A missing field or a renamed getter only costs the shift; the
             // label still lands on the anchor, so there is nothing to report.
@@ -3692,8 +3863,159 @@ final class TrioHooks {
         if (debugLog()) {
             log(LOG_INFO, "out type: reserved " + reserve + "px, icon padding "
                     + saved[0] + "/" + saved[1] + " -> " + left + "/" + right
-                    + ", icons w=" + icons.getWidth());
+                    + ", icons w=" + icons.getWidth()
+                    + " id=" + System.identityHashCode(icons)
+                    + " cls=" + icons.getClass().getSimpleName()
+                    + " mapSize=" + OUT_PAD_SAVED.size());
         }
+    }
+
+    /**
+     * Hides the native icons the reserved strip has pushed out of the container.
+     *
+     * <p>MIUI is supposed to do this itself: its own onLayout walks the row and
+     * marks whatever no longer fits as hidden. On this build that walk does
+     * nothing - the value it accumulates is never stored back, so the test that
+     * hides a child never fires - and with the strip reserved the icons simply
+     * pile up on each other. That is the overlap, and it happens with or without
+     * the island.
+     *
+     * <p>Only the native icons are touched: the slots this module draws itself
+     * are skipped, and the battery is not in this container to begin with.
+     */
+    private static void hideOverflowingIcons(ViewGroup container) {
+        final Object owner = batteryContainerOf(container);
+        if (!(owner instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup battery = (ViewGroup) owner;
+        // What the module draws beside the row, in the coordinates they share:
+        // the reading and the label are children of the battery container, and
+        // so is this row. Anything the row draws across one of those boxes is
+        // drawn underneath it, and that is the whole test - a boundary derived
+        // from a reserved width is only ever an approximation of where those
+        // views ended up, and it is wrong whenever the row is translated (the
+        // island does exactly that) or the strip is measured for another row.
+        final List<int[]> boxes = new ArrayList<int[]>();
+        collectBox(boxes, findOutSignal(battery));
+        collectBox(boxes, findOutTypeLabel(battery));
+        final int rowLeft = container.getLeft() + Math.round(container.getTranslationX());
+        for (int i = 0; i < container.getChildCount(); i++) {
+            final View child;
+            try {
+                child = container.getChildAt(i);
+            } catch (Throwable t) {
+                continue;
+            }
+            if (child == null || isModuleOwned(child)) {
+                continue;
+            }
+            final boolean ours = isCollapsed(child);
+            if (child.getVisibility() == View.VISIBLE) {
+                final int w = child.getMeasuredWidth();
+                if (w <= 0) {
+                    continue;
+                }
+                LAST_WIDTH.put(child, Integer.valueOf(w));
+                final int left = rowLeft + child.getLeft() + Math.round(child.getTranslationX());
+                LAST_LEFT.put(child, Integer.valueOf(left));
+                if (overlaps(boxes, left, left + w) && markCollapsed(child)) {
+                    try {
+                        child.setVisibility(View.GONE);
+                    } catch (Throwable ignored) {
+                        // never let one child abort the pass
+                    }
+                }
+                continue;
+            }
+            if (!ours) {
+                continue;
+            }
+            final Integer lastLeft = LAST_LEFT.get(child);
+            final Integer lastWidth = LAST_WIDTH.get(child);
+            final boolean clear = (lastLeft == null || lastWidth == null)
+                    || !overlaps(boxes, lastLeft.intValue(),
+                            lastLeft.intValue() + lastWidth.intValue());
+            if (clear && unmarkCollapsed(child)) {
+                try {
+                    child.setVisibility(View.VISIBLE);
+                } catch (Throwable ignored) {
+                    // never let one child abort the pass
+                }
+            }
+        }
+        final StringBuilder decision = new StringBuilder();
+        for (int i = 0; i < boxes.size(); i++) {
+            decision.append('[').append(boxes.get(i)[0]).append("..")
+                    .append(boxes.get(i)[1]).append(']');
+        }
+        for (int i = 0; i < container.getChildCount(); i++) {
+            final View c = container.getChildAt(i);
+            if (c == null || isModuleOwned(c)) {
+                continue;
+            }
+            if (c.getVisibility() == View.GONE && !isCollapsed(c)) {
+                continue;
+            }
+            decision.append(' ').append(slotOf(c)).append('=').append(c.getVisibility());
+        }
+        final String line = decision.toString();
+        final String previous = LAST_DECISION.get(container);
+        if (debugLog() && !line.equals(previous)) {
+            LAST_DECISION.put(container, line);
+            log(LOG_INFO, "row: boxes=" + (boxes.isEmpty() ? "none" : "")
+                    + " kg=" + isKeyguardRow(container) + " |" + line);
+        }
+    }
+
+    /** Records where {@code v} is drawn, in its parent's coordinates. */
+    private static void collectBox(List<int[]> out, View v) {
+        if (v == null || v.getVisibility() != View.VISIBLE || v.getWidth() <= 0) {
+            return;
+        }
+        final int left = v.getLeft() + Math.round(v.getTranslationX());
+        out.add(new int[] {left, left + v.getWidth()});
+    }
+
+    /** True when {@code [left, right)} crosses any of the recorded boxes. */
+    private static boolean overlaps(List<int[]> boxes, int left, int right) {
+        for (int i = 0; i < boxes.size(); i++) {
+            final int[] box = boxes.get(i);
+            if (left < box[1] && right > box[0]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True when the overflow pass is the one hiding this child. */
+    private static boolean isCollapsed(View child) {
+        synchronized (COLLAPSED) {
+            return COLLAPSED.containsKey(child);
+        }
+    }
+
+    /** Left edge as drawn on screen, translation included. */
+    private static float drawnLeft(View v) {
+        return v.getLeft() + v.getTranslationX();
+    }
+
+    /** Right edge as drawn on screen, translation included. */
+    private static float drawnRight(View v) {
+        return v.getRight() + v.getTranslationX();
+    }
+
+    /**
+     * True for the views this module draws itself, plus the slots it has taken
+     * over. Those are never hidden by the overflow pass; everything else in the
+     * row belongs to the native layout, or to another module drawing into it.
+     */
+    private static boolean isModuleOwned(View child) {
+        if (child instanceof OutTypeLabel || child instanceof OutSignalView) {
+            return true;
+        }
+        final String slot = slotOf(child);
+        return slot != null && MANAGED_SLOTS.contains(slot);
     }
 
     /** Hands the reserved strip back to the native icon row. Idempotent. */
@@ -3973,6 +4295,16 @@ final class TrioHooks {
         // this view's width plus the label's, and the gap around both.
         reserveOutRingStrip(container);
         placeOutTypeLabel(container, view, anchor, outSignalMargin(container));
+        // The pass that removes an overlapping icon runs from the row's own
+        // onLayout, and by then the reading may not be mounted yet - it is added
+        // here, from a posted runnable. Re-running it now that the reading is
+        // there is what keeps the row from staying overlapped until something
+        // else happens to lay it out again, which on device is exactly what it
+        // did: the first pass read a zero strip and left the last icon in place.
+        final View icons = iconContainerIn(container);
+        if (icons instanceof ViewGroup) {
+            hideOverflowingIcons((ViewGroup) icons);
+        }
         // The reading is not part of this view's geometry: the height comes from
         // the battery meter and the width from that height alone, so switching
         // between the one-row and two-row reading - or any SIM falling off the
@@ -4032,7 +4364,17 @@ final class TrioHooks {
      * strip is one number: whichever view is updated last would otherwise decide
      * the padding for both of them.
      */
-    private static void reserveOutRingStrip(ViewGroup container) {
+    /**
+     * The width the out-of-ring reading needs from the native icon row right
+     * now, or 0 when nothing is mounted.
+     *
+     * <p>Split out of {@link #reserveOutRingStrip} so that the overflow pass can
+     * ask the same question. It runs from {@code onLayout}, while the padding is
+     * applied from a posted runnable, so the padding it would otherwise read is
+     * often not there yet - and the weak map the padding is recorded in does not
+     * survive the row being rebuilt either.
+     */
+    private static int outRingStripWidth(ViewGroup container) {
         final OutSignalView signal = findOutSignal(container);
         final boolean signalOn = signal != null && signal.getVisibility() == View.VISIBLE;
         final OutTypeLabel label = findOutTypeLabel(container);
@@ -4067,6 +4409,20 @@ final class TrioHooks {
             // the reading was on screen.
             total += label.getMeasuredWidth() + labelInward + labelOutward;
         }
+        if (total <= 0 && outSignalWanted()) {
+            final Integer last = LAST_STRIP.get(container);
+            if (last != null) {
+                total = last.intValue();
+            }
+        }
+        if (total > 0) {
+            LAST_STRIP.put(container, Integer.valueOf(total));
+        }
+        return total;
+    }
+
+    private static void reserveOutRingStrip(ViewGroup container) {
+        final int total = outRingStripWidth(container);
         if (total <= 0) {
             releaseOutTypeSpace(container);
             return;
