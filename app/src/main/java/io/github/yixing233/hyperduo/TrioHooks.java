@@ -1356,11 +1356,24 @@ final class TrioHooks {
             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                 final Object result = chain.proceed();
                 final Object root = chain.getArg(0);
-                if (root instanceof View) {
-                    final View island = findIsland((View) root);
-                    if (island != null) {
-                        sIslandRoot = new WeakReference<View>(island);
+                if (!(root instanceof View)) {
+                    return result;
+                }
+                // The window is recognised by its title, and its root kept: the
+                // island's own views are inflated after this call, so searching
+                // here would come up empty. The search happens on each use.
+                CharSequence title = null;
+                try {
+                    final Object attrs = chain.getArg(1);
+                    if (attrs instanceof android.view.WindowManager.LayoutParams) {
+                        title = ((android.view.WindowManager.LayoutParams) attrs).getTitle();
                     }
+                } catch (Throwable ignored) {
+                    // no title to read: fall back to the class name below
+                }
+                if ((title != null && title.toString().contains("sland"))
+                        || findIsland((View) root) != null) {
+                    sIslandRoot = new WeakReference<View>((View) root);
                 }
                 return result;
             }
@@ -1374,12 +1387,22 @@ final class TrioHooks {
         return n;
     }
 
-    /** The island's view, when its window has been seen. */
+    /**
+     * The island's own view, or null when it cannot be found.
+     *
+     * <p>Looked up on every call rather than remembered: the island's views are
+     * inflated into its window after the window is set up, and which of them is
+     * showing changes with the island's state - the small pill and the expanded
+     * card are different views.
+     */
     private static View islandView(View fallback) {
         final WeakReference<View> ref = sIslandRoot;
-        final View cached = (ref == null) ? null : ref.get();
-        if (cached != null && cached.getWidth() > 0) {
-            return cached;
+        final View window = (ref == null) ? null : ref.get();
+        if (window != null) {
+            final View island = findIsland(window);
+            if (island != null) {
+                return island;
+            }
         }
         return findIsland(rootOf(fallback));
     }
@@ -3908,7 +3931,10 @@ final class TrioHooks {
         // stay: the room before the reading is 302px on this device and the row
         // needs about 293. The island's shift of the row's children is added
         // back rather than fought with.
-        final float shift = islandShiftPx(container) - (container.getWidth() - room);
+        // Deliberately without the island's own shift: islandShiftPx() reads 302
+        // while a music island is up on this build, and folding that into the
+        // target threw the row right off the bar.
+        final float shift = -(container.getWidth() - room);
         if (container.getTranslationX() != shift) {
             container.setTranslationX(shift);
         }
