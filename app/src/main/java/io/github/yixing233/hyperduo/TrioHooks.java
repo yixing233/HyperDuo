@@ -3987,7 +3987,9 @@ final class TrioHooks {
                     .append(" room=").append(room)
                     .append(" shift=").append(shift)
                     .append(" total=").append(shownTotal)
-                    .append(" island=").append(islandUp);
+                    .append(" island=").append(islandUp)
+                    .append(" ibox=").append(boxOf(islandView(signal)))
+                    .append(" sbox=").append(boxOf(signal));
             for (int i = 0; i < container.getChildCount(); i++) {
                 final View c = childAt(container, i);
                 if (c == null || isModuleOwned(c) || c.getVisibility() != View.VISIBLE) {
@@ -4143,6 +4145,20 @@ final class TrioHooks {
             }
         }
         return null;
+    }
+
+    /** The view's box on screen, for the diagnostics. */
+    private static String boxOf(View v) {
+        if (v == null || v.getWidth() <= 0) {
+            return "none";
+        }
+        final int[] at = new int[2];
+        try {
+            v.getLocationOnScreen(at);
+        } catch (Throwable t) {
+            return "err";
+        }
+        return "[" + at[0] + ".." + (at[0] + v.getWidth()) + "]";
     }
 
     /** Records where {@code v} is drawn, in its parent's coordinates. */
