@@ -3839,7 +3839,13 @@ final class TrioHooks {
         // Everything is worked out from the row's layout box, never from where
         // it is drawn: the shift below moves the drawn box, and a decision that
         // read it back would chase its own tail.
-        final int room = Math.max(0, leftMost - container.getLeft());
+        // One margin of breathing room between the row and whatever the module
+        // draws beside it. Without it the row is slid until it ends exactly on
+        // that view's left edge, which reads as the two being jammed together.
+        // The same margin the reading keeps from its own neighbour is the one
+        // that means "the gap before this view", so it is reused here.
+        final int room = Math.max(0,
+                leftMost - container.getLeft() - outSignalMargin(container));
 
         // Slide the row so that what it lays out stops where the reading starts.
         // MIUI lays the row out to the container's full width - the end padding
