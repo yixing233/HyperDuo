@@ -3999,17 +3999,16 @@ final class TrioHooks {
         // and sitting on top of what the module draws. The charging island keeps
         // the reading - it hides the battery, and the reading is then the only
         // thing carrying the signal.
-        final OutSignalView signal = findOutSignal(battery);
-        final OutTypeLabel label = findOutTypeLabel(battery);
-        // An island that is actually showing, not the empty content view the
-        // island's window keeps up when there is nothing on. Its extent cannot be
-        // measured - the widest view in that window is a full-width container, so
-        // comparing boxes would read as an island across the whole bar - but its
-        // presence is enough: while it is up it holds the row's end, which is
-        // where the reading is.
-        final boolean islandUp = !islandHideBattery() && islandShowing();
-        fade(signal, islandUp ? 0f : 1f);
-        fade(label, islandUp ? 0f : 1f);
+        // The island is deliberately not consulted here. Every way of asking it
+        // that this build offers - the row's island shift, a walk of the bar's
+        // own tree, the views captured from the island's window - answers about
+        // the wrong thing: the shift reads zero for a music island, the island
+        // is a window of its own and not in the bar's tree at all, and the only
+        // view of its window this module ever sees added is the empty content
+        // view, which is up whenever the island is *not* showing and spans the
+        // window when it is. Fading the reading on that answer took the signal
+        // off the bar, which is worse than the overlap it was meant to avoid.
+        // Until the island's own view can be reached, the reading stays.
 
         // Give up an icon only when the row genuinely does not fit, rightmost
         // first - which is where the reading is - and only in alpha, never by
@@ -4067,9 +4066,7 @@ final class TrioHooks {
                     .append(" room=").append(room)
                     .append(" shift=").append(shift)
                     .append(" total=").append(shownTotal)
-                    .append(" island=").append(islandUp)
-                    .append(" ibox=").append(boxOf(islandView(signal)))
-                    .append(" sbox=").append(boxOf(signal));
+                    .append(" sbox=").append(boxOf(findOutSignal(battery)));
             for (int i = 0; i < container.getChildCount(); i++) {
                 final View c = childAt(container, i);
                 if (c == null || isModuleOwned(c) || c.getVisibility() != View.VISIBLE) {
