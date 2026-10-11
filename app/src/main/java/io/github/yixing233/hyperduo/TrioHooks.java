@@ -3865,9 +3865,18 @@ final class TrioHooks {
         // have to give up the same way, or they are left sitting under it. The
         // charging island is the exception - it hides the battery, and the
         // reading is then the only thing carrying the signal, so it stays.
-        final boolean islandUp = islandShiftPx(container) > 0 && !islandHideBattery();
-        fade(findOutSignal(battery), islandUp ? 0f : 1f);
-        fade(findOutTypeLabel(battery), islandUp ? 0f : 1f);
+        // The island is found and measured rather than inferred from the row's
+        // own shift: on this build MIUI does not slide this container for a
+        // music island at all, so the shift stays zero while the island is up
+        // and sitting on top of what the module draws. The charging island keeps
+        // the reading - it hides the battery, and the reading is then the only
+        // thing carrying the signal.
+        final OutSignalView signal = findOutSignal(battery);
+        final OutTypeLabel label = findOutTypeLabel(battery);
+        final boolean islandUp = !islandHideBattery()
+                && (islandCovers(signal) || islandCovers(label));
+        fade(signal, islandUp ? 0f : 1f);
+        fade(label, islandUp ? 0f : 1f);
 
         // Give up an icon only when the row genuinely does not fit, rightmost
         // first - which is where the reading is - and only in alpha, never by
@@ -4021,6 +4030,66 @@ final class TrioHooks {
         if (icons instanceof ViewGroup) {
             hideOverflowingIcons((ViewGroup) icons);
         }
+    }
+
+    /**
+     * True when the super island is drawn across {@code view}.
+     *
+     * <p>Both boxes are taken on screen, which is the one space they certainly
+     * share: the island lives in the status bar's own hierarchy and the reading
+     * in the battery container, and the two are not related by a single parent
+     * offset that could be trusted.
+     */
+    private static boolean islandCovers(View view) {
+        if (view == null || view.getVisibility() != View.VISIBLE || view.getWidth() <= 0) {
+            return false;
+        }
+        final View island = findIsland(rootOf(view));
+        if (island == null || island.getVisibility() != View.VISIBLE || island.getWidth() <= 0) {
+            return false;
+        }
+        final int[] own = new int[2];
+        final int[] box = new int[2];
+        try {
+            view.getLocationOnScreen(own);
+            island.getLocationOnScreen(box);
+        } catch (Throwable t) {
+            return false;
+        }
+        return own[0] < box[0] + island.getWidth() && own[0] + view.getWidth() > box[0];
+    }
+
+    private static View rootOf(View view) {
+        View current = view;
+        for (ViewParent parent = view.getParent(); parent instanceof View;
+             parent = current.getParent()) {
+            current = (View) parent;
+        }
+        return current;
+    }
+
+    /** The super island's own view, or null when this build has none. */
+    private static View findIsland(View view) {
+        if (view == null) {
+            return null;
+        }
+        try {
+            if (view.getClass().getName().contains("ynamicIsland")) {
+                return view;
+            }
+        } catch (Throwable ignored) {
+            // a class without a name is not the island
+        }
+        if (view instanceof ViewGroup) {
+            final ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                final View found = findIsland(childAt(group, i));
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     /** Records where {@code v} is drawn, in its parent's coordinates. */
