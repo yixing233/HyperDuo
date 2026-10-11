@@ -3860,6 +3860,15 @@ final class TrioHooks {
             container.setTranslationX(shift);
         }
 
+        // The island takes the row's end for itself: MIUI slides the row's own
+        // icons clear of it, and the two views this module draws beside the row
+        // have to give up the same way, or they are left sitting under it. The
+        // charging island is the exception - it hides the battery, and the
+        // reading is then the only thing carrying the signal, so it stays.
+        final boolean islandUp = islandShiftPx(container) > 0 && !islandHideBattery();
+        fade(findOutSignal(battery), islandUp ? 0f : 1f);
+        fade(findOutTypeLabel(battery), islandUp ? 0f : 1f);
+
         // Give up an icon only when the row genuinely does not fit, rightmost
         // first - which is where the reading is - and only in alpha, never by
         // leaving the layout: a child that leaves it makes MIUI lay the rest out
@@ -3915,7 +3924,8 @@ final class TrioHooks {
             sb.append("row kg=").append(isKeyguardRow(container))
                     .append(" room=").append(room)
                     .append(" shift=").append(shift)
-                    .append(" total=").append(shownTotal);
+                    .append(" total=").append(shownTotal)
+                    .append(" island=").append(islandUp);
             for (int i = 0; i < container.getChildCount(); i++) {
                 final View c = childAt(container, i);
                 if (c == null || isModuleOwned(c) || c.getVisibility() != View.VISIBLE) {
@@ -3943,6 +3953,9 @@ final class TrioHooks {
      * layout. Fading keeps every child exactly where MIUI put it.
      */
     private static void fade(View child, float alpha) {
+        if (child == null) {
+            return;
+        }
         try {
             if (child.getAlpha() != alpha) {
                 child.setAlpha(alpha);
