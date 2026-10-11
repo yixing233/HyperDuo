@@ -3994,6 +3994,22 @@ final class TrioHooks {
         }
     }
 
+    /**
+     * Re-runs the overflow decision for the row under {@code battery}.
+     *
+     * <p>The reading and the label are placed by the refresh passes, which run
+     * from the same layout as the overflow pass and can move them - the island
+     * appearing moves both. The overflow pass has already decided by then, using
+     * the position they had a moment earlier, so an icon it judged clear can end
+     * up under them until something else lays the row out again.
+     */
+    private static void redecideOverflow(ViewGroup battery) {
+        final View icons = iconContainerIn(battery);
+        if (icons instanceof ViewGroup) {
+            hideOverflowingIcons((ViewGroup) icons);
+        }
+    }
+
     /** Records where {@code v} is drawn, in its parent's coordinates. */
     private static void collectBox(List<int[]> out, View v) {
         if (v == null || v.getVisibility() != View.VISIBLE || v.getWidth() <= 0) {
