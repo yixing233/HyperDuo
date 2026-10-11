@@ -1333,6 +1333,9 @@ final class TrioHooks {
         return n;
     }
 
+    /** Bounded count of windows logged, so the diagnostic cannot flood. */
+    private static volatile int sIslandWindows;
+
     /** The super island's window root, captured when its window is set up. */
     private static volatile WeakReference<View> sIslandRoot;
 
@@ -1371,8 +1374,15 @@ final class TrioHooks {
                 } catch (Throwable ignored) {
                     // no title to read: fall back to the class name below
                 }
-                if ((title != null && title.toString().contains("sland"))
-                        || findIsland((View) root) != null) {
+                final boolean island = (title != null && title.toString().contains("sland"))
+                        || findIsland((View) root) != null;
+                if (sIslandWindows < 20) {
+                    sIslandWindows++;
+                    log(LOG_INFO, "window: title=" + title
+                            + " root=" + root.getClass().getName()
+                            + " island=" + island);
+                }
+                if (island) {
                     sIslandRoot = new WeakReference<View>((View) root);
                 }
                 return result;
