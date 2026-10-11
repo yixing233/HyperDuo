@@ -301,12 +301,6 @@ final class TrioHooks {
     private static final Map<View, int[]> OUT_PAD_SAVED =
             Collections.synchronizedMap(new HashMap<View, int[]>());
 
-    /** Last row decision logged, so the log fires on change only. */
-    private static final Map<View, String> LAST_DECISION =
-            Collections.synchronizedMap(new WeakHashMap<View, String>());
-
-
-
     /** Hard cap on total child dumps, so a layout loop cannot flood the log. */
     private static volatile int sDiagDumps;
     /** Hard cap on container headers, including {@code owned} flips. */
@@ -347,7 +341,6 @@ final class TrioHooks {
         hooked += group(module, cl, 16);
         hooked += group(module, cl, 17);
         hooked += group(module, cl, 18);
-        hooked += group(module, cl, 19);
         log(module, "HyperDuo installed, hooks=" + hooked
                 + " enabled=" + TrioConfig.get().enabled);
     }
@@ -719,7 +712,6 @@ final class TrioHooks {
                 case 16: return hookIconTint(module, cl);
                 case 17: return hookKeyguardBar(module, cl);
                 case 18: return hookIconAdded(module, cl);
-                case 19: return hookIslandWindow(module, cl);
                 default: return 0;
             }
         } catch (Throwable t) {
@@ -1333,129 +1325,11 @@ final class TrioHooks {
         return n;
     }
 
-    /** Bounded count of windows logged, so the diagnostic cannot flood. */
-    private static volatile int sIslandWindows;
-
-    /** The super island's window root, captured when its window is set up. */
-    private static volatile WeakReference<View> sIslandRoot;
-
-    /**
-     * Captures the super island's window.
-     *
-     * <p>The island is not part of the status bar's hierarchy - it is a window of
-     * its own, {@code DynamicIslandWindow} - so nothing the module hooks inside
+ - so nothing the module hooks inside
      * the bar can see it. Its window is set up once through
      * {@code ViewRootImpl.setView}, and the view that arrives there is searched
      * for the island, which is what makes its position knowable at all.
      */
-    private static int hookIslandWindow(XposedModule module, ClassLoader cl) {
-        final Class<?> group = Refl.cls("android.view.ViewGroup", cl);
-        if (group == null) {
-            log(module, "ViewGroup missing");
-            return 0;
-        }
-        final XposedInterface.Hooker hooker = new XposedInterface.Hooker() {
-            @Override
-            public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                final Object arg = chain.getArg(0);
-                if (arg instanceof View) {
-                    final View child = (View) arg;
-                    if (isIsland(child)) {
-                        rememberIsland(child);
-                        if (sIslandWindows < 10) {
-                            sIslandWindows++;
-                            log(LOG_INFO, "island view: " + child.getClass().getName());
-                        }
-                    }
-                }
-                return chain.proceed();
-            }
-        };
-        // The island's window is created before any hook of this module runs, so
-        // waiting for ViewRootImpl.setView never saw it. Every view is added to a
-        // parent through one of these, whenever it is created.
-        int n = hook(module, Refl.method(group, "addView", View.class),
-                "hyperduo-island-add", hooker);
-        n += hook(module, Refl.method(group, "addView", View.class, int.class),
-                "hyperduo-island-add-at", hooker);
-        n += hook(module, Refl.method(group, "addView", View.class, int.class,
-                        android.view.ViewGroup.LayoutParams.class),
-                "hyperduo-island-add-lp", hooker);
-        return n;
-    }
-
-    /** True for the super island's own views. */
-    private static boolean isIsland(View view) {
-        try {
-            return view.getClass().getName().contains("ynamicIsland");
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    /** Every island view seen, weakest first in the list but kept by identity. */
-    private static final List<WeakReference<View>> ISLAND_VIEWS =
-            Collections.synchronizedList(new ArrayList<WeakReference<View>>());
-
-    private static void rememberIsland(View view) {
-        synchronized (ISLAND_VIEWS) {
-            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
-                if (ISLAND_VIEWS.get(i).get() == view) {
-                    return;
-                }
-            }
-            if (ISLAND_VIEWS.size() < 32) {
-                ISLAND_VIEWS.add(new WeakReference<View>(view));
-            }
-        }
-        // The window root as well: the island's other content views - the pill
-        // and the expanded card - were inflated before this module's hooks ran,
-        // so they are never seen being added. They can still be found by walking
-        // down from the root the one captured view belongs to.
-        final View window = rootOf(view);
-        if (window != view) {
-            sIslandRoot = new WeakReference<View>(window);
-        }
-    }
-
-    /**
-     * The island's own view, or null when it cannot be found.
-     *
-     * <p>Looked up on every call rather than remembered: the island's views are
-     * inflated into its window after the window is set up, and which of them is
-     * showing changes with the island's state - the small pill and the expanded
-     * card are different views.
-     */
-    private static View islandView(View fallback) {
-        // The island's window holds several content views - the empty one it
-        // shows when nothing is on, the pill, the expanded card - and only one
-        // of them is up at a time. The empty one is skipped when something real
-        // is showing, because it spans the window and would read as an island
-        // across the whole bar.
-        final WeakReference<View> ref = sIslandRoot;
-        final View window = (ref == null) ? null : ref.get();
-        View widest = null;
-        if (window != null) {
-            widest = widestIsland(window, false);
-            if (widest == null) {
-                widest = widestIsland(window, true);
-            }
-        }
-        if (widest != null) {
-            return widest;
-        }
-        synchronized (ISLAND_VIEWS) {
-            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
-                final View candidate = ISLAND_VIEWS.get(i).get();
-                if (candidate != null && candidate.getVisibility() == View.VISIBLE
-                        && candidate.getWidth() > 0) {
-                    return candidate;
-                }
-            }
-        }
-        return findIsland(rootOf(fallback));
-    }
-
     /** Real island requests per meter, so a mid-island disable can replay them. */
     private static final Map<Object, boolean[]> BATTERY_ISLAND_REQUESTS =
             new WeakHashMap<Object, boolean[]>();
@@ -4060,29 +3934,6 @@ final class TrioHooks {
             }
             shownTotal += w;
         }
-        if (debugLog()) {
-            final StringBuilder sb = new StringBuilder();
-            sb.append("row kg=").append(isKeyguardRow(container))
-                    .append(" room=").append(room)
-                    .append(" shift=").append(shift)
-                    .append(" total=").append(shownTotal)
-                    .append(" sbox=").append(boxOf(findOutSignal(battery)));
-            for (int i = 0; i < container.getChildCount(); i++) {
-                final View c = childAt(container, i);
-                if (c == null || isModuleOwned(c) || c.getVisibility() != View.VISIBLE) {
-                    continue;
-                }
-                if (c.getMeasuredWidth() <= 0) {
-                    continue;
-                }
-                sb.append(' ').append(slotOf(c)).append(" a=").append(c.getAlpha());
-            }
-            final String line = sb.toString();
-            if (!line.equals(LAST_DECISION.get(container))) {
-                LAST_DECISION.put(container, line);
-                log(LOG_INFO, line);
-            }
-        }
     }
 
     /**
@@ -4146,145 +3997,6 @@ final class TrioHooks {
         if (container.getTranslationX() != 0f) {
             container.setTranslationX(0f);
         }
-    }
-
-    /**
-     * Re-runs the overflow decision for the row under {@code battery}.
-     *
-     * <p>The reading and the label are placed by the refresh passes, which run
-     * from the same layout as the overflow pass and can move them - the island
-     * appearing moves both. The overflow pass has already decided by then, using
-     * the position they had a moment earlier, so an icon it judged clear can end
-     * up under them until something else lays the row out again.
-     */
-    private static void redecideOverflow(ViewGroup battery) {
-        final View icons = iconContainerIn(battery);
-        if (icons instanceof ViewGroup) {
-            hideOverflowingIcons((ViewGroup) icons);
-        }
-    }
-
-    /**
-     * True when the super island is drawn across {@code view}.
-     *
-     * <p>Both boxes are taken on screen, which is the one space they certainly
-     * share: the island lives in the status bar's own hierarchy and the reading
-     * in the battery container, and the two are not related by a single parent
-     * offset that could be trusted.
-     */
-    private static boolean islandCovers(View view) {
-        if (view == null || view.getVisibility() != View.VISIBLE || view.getWidth() <= 0) {
-            return false;
-        }
-        final View island = islandView(view);
-        if (island == null || island.getVisibility() != View.VISIBLE || island.getWidth() <= 0) {
-            return false;
-        }
-        final int[] own = new int[2];
-        final int[] box = new int[2];
-        try {
-            view.getLocationOnScreen(own);
-            island.getLocationOnScreen(box);
-        } catch (Throwable t) {
-            return false;
-        }
-        return own[0] < box[0] + island.getWidth() && own[0] + view.getWidth() > box[0];
-    }
-
-    private static View rootOf(View view) {
-        View current = view;
-        for (ViewParent parent = view.getParent(); parent instanceof View;
-             parent = current.getParent()) {
-            current = (View) parent;
-        }
-        return current;
-    }
-
-    /** The super island's own view, or null when this build has none. */
-    private static View findIsland(View view) {
-        if (view == null) {
-            return null;
-        }
-        try {
-            if (view.getClass().getName().contains("ynamicIsland")) {
-                return view;
-            }
-        } catch (Throwable ignored) {
-            // a class without a name is not the island
-        }
-        if (view instanceof ViewGroup) {
-            final ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                final View found = findIsland(childAt(group, i));
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
-
-    /** True while a super island is on screen, the empty content view aside. */
-    private static boolean islandShowing() {
-        final WeakReference<View> ref = sIslandRoot;
-        final View window = (ref == null) ? null : ref.get();
-        if (window != null && widestIsland(window, false) != null) {
-            return true;
-        }
-        synchronized (ISLAND_VIEWS) {
-            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
-                final View candidate = ISLAND_VIEWS.get(i).get();
-                if (candidate != null && candidate.getVisibility() == View.VISIBLE
-                        && candidate.getWidth() > 0
-                        && !candidate.getClass().getName().contains("Empty")) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * The widest island view under {@code view}, ignoring the empty content view
-     * unless {@code allowEmpty}. Only one of the island's content views is up at
-     * a time, and the empty one spans the window, so it is the wrong thing to
-     * measure whenever something real is showing.
-     */
-    private static View widestIsland(View view, boolean allowEmpty) {
-        View best = null;
-        try {
-            if (isIsland(view) && view.getVisibility() == View.VISIBLE && view.getWidth() > 0
-                    && (allowEmpty || !view.getClass().getName().contains("Empty"))) {
-                best = view;
-            }
-        } catch (Throwable ignored) {
-            // a view that will not answer is not the island
-        }
-        if (view instanceof ViewGroup) {
-            final ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                final View found = widestIsland(childAt(group, i), allowEmpty);
-                if (found != null
-                        && (best == null || found.getWidth() > best.getWidth())) {
-                    best = found;
-                }
-            }
-        }
-        return best;
-    }
-
-    /** The view's box on screen, for the diagnostics. */
-    private static String boxOf(View v) {
-        if (v == null || v.getWidth() <= 0) {
-            return "none";
-        }
-        final int[] at = new int[2];
-        try {
-            v.getLocationOnScreen(at);
-        } catch (Throwable t) {
-            return "err";
-        }
-        return "[" + at[0] + ".." + (at[0] + v.getWidth()) + "]";
     }
 
     /** Records where {@code v} is drawn, in its parent's coordinates. */
