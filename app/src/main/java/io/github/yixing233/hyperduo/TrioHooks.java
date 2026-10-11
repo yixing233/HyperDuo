@@ -1361,7 +1361,7 @@ final class TrioHooks {
                 if (arg instanceof View) {
                     final View child = (View) arg;
                     if (isIsland(child)) {
-                        sIslandRoot = new WeakReference<View>(child);
+                        rememberIsland(child);
                         if (sIslandWindows < 10) {
                             sIslandWindows++;
                             log(LOG_INFO, "island view: " + child.getClass().getName());
@@ -1393,6 +1393,23 @@ final class TrioHooks {
         }
     }
 
+    /** Every island view seen, weakest first in the list but kept by identity. */
+    private static final List<WeakReference<View>> ISLAND_VIEWS =
+            Collections.synchronizedList(new ArrayList<WeakReference<View>>());
+
+    private static void rememberIsland(View view) {
+        synchronized (ISLAND_VIEWS) {
+            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
+                if (ISLAND_VIEWS.get(i).get() == view) {
+                    return;
+                }
+            }
+            if (ISLAND_VIEWS.size() < 32) {
+                ISLAND_VIEWS.add(new WeakReference<View>(view));
+            }
+        }
+    }
+
     /**
      * The island's own view, or null when it cannot be found.
      *
@@ -1402,6 +1419,29 @@ final class TrioHooks {
      * card are different views.
      */
     private static View islandView(View fallback) {
+        // The island's window holds several content views - the empty one it
+        // shows when nothing is on, the pill, the expanded card - and only one
+        // of them is up at a time. The empty one is skipped when something real
+        // is showing, because it spans the window and would read as an island
+        // across the whole bar.
+        View empty = null;
+        synchronized (ISLAND_VIEWS) {
+            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
+                final View candidate = ISLAND_VIEWS.get(i).get();
+                if (candidate == null || candidate.getVisibility() != View.VISIBLE
+                        || candidate.getWidth() <= 0) {
+                    continue;
+                }
+                if (candidate.getClass().getName().contains("Empty")) {
+                    empty = candidate;
+                    continue;
+                }
+                return candidate;
+            }
+        }
+        if (empty != null) {
+            return empty;
+        }
         final WeakReference<View> ref = sIslandRoot;
         final View window = (ref == null) ? null : ref.get();
         if (window != null) {
