@@ -347,6 +347,7 @@ final class TrioHooks {
         hooked += group(module, cl, 16);
         hooked += group(module, cl, 17);
         hooked += group(module, cl, 18);
+        hooked += group(module, cl, 19);
         log(module, "HyperDuo installed, hooks=" + hooked
                 + " enabled=" + TrioConfig.get().enabled);
     }
@@ -718,6 +719,7 @@ final class TrioHooks {
                 case 16: return hookIconTint(module, cl);
                 case 17: return hookKeyguardBar(module, cl);
                 case 18: return hookIconAdded(module, cl);
+                case 19: return hookIslandWindow(module, cl);
                 default: return 0;
             }
         } catch (Throwable t) {
@@ -1329,6 +1331,57 @@ final class TrioHooks {
                     }
                 });
         return n;
+    }
+
+    /** The super island's window root, captured when its window is set up. */
+    private static volatile WeakReference<View> sIslandRoot;
+
+    /**
+     * Captures the super island's window.
+     *
+     * <p>The island is not part of the status bar's hierarchy - it is a window of
+     * its own, {@code DynamicIslandWindow} - so nothing the module hooks inside
+     * the bar can see it. Its window is set up once through
+     * {@code ViewRootImpl.setView}, and the view that arrives there is searched
+     * for the island, which is what makes its position knowable at all.
+     */
+    private static int hookIslandWindow(XposedModule module, ClassLoader cl) {
+        final Class<?> cls = Refl.cls("android.view.ViewRootImpl", cl);
+        if (cls == null) {
+            log(module, "ViewRootImpl missing");
+            return 0;
+        }
+        final XposedInterface.Hooker hooker = new XposedInterface.Hooker() {
+            @Override
+            public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                final Object result = chain.proceed();
+                final Object root = chain.getArg(0);
+                if (root instanceof View) {
+                    final View island = findIsland((View) root);
+                    if (island != null) {
+                        sIslandRoot = new WeakReference<View>(island);
+                    }
+                }
+                return result;
+            }
+        };
+        int n = hook(module, Refl.method(cls, "setView", View.class,
+                        android.view.WindowManager.LayoutParams.class, View.class, int.class),
+                "hyperduo-island-window", hooker);
+        n += hook(module, Refl.method(cls, "setView", View.class,
+                        android.view.WindowManager.LayoutParams.class, View.class),
+                "hyperduo-island-window3", hooker);
+        return n;
+    }
+
+    /** The island's view, when its window has been seen. */
+    private static View islandView(View fallback) {
+        final WeakReference<View> ref = sIslandRoot;
+        final View cached = (ref == null) ? null : ref.get();
+        if (cached != null && cached.getWidth() > 0) {
+            return cached;
+        }
+        return findIsland(rootOf(fallback));
     }
 
     /** Real island requests per meter, so a mid-island disable can replay them. */
@@ -4044,7 +4097,7 @@ final class TrioHooks {
         if (view == null || view.getVisibility() != View.VISIBLE || view.getWidth() <= 0) {
             return false;
         }
-        final View island = findIsland(rootOf(view));
+        final View island = islandView(view);
         if (island == null || island.getVisibility() != View.VISIBLE || island.getWidth() <= 0) {
             return false;
         }
