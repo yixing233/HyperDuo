@@ -1325,11 +1325,6 @@ final class TrioHooks {
         return n;
     }
 
- - so nothing the module hooks inside
-     * the bar can see it. Its window is set up once through
-     * {@code ViewRootImpl.setView}, and the view that arrives there is searched
-     * for the island, which is what makes its position knowable at all.
-     */
     /** Real island requests per meter, so a mid-island disable can replay them. */
     private static final Map<Object, boolean[]> BATTERY_ISLAND_REQUESTS =
             new WeakHashMap<Object, boolean[]>();
