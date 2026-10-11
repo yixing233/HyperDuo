@@ -3857,9 +3857,21 @@ final class TrioHooks {
         // Deliberately without the island's own shift: islandShiftPx() reads 302
         // while a music island is up on this build, and folding that into the
         // target threw the row right off the bar.
-        final float shift = -(container.getWidth() - room);
+        // The row's own width is not the width its icons use: MIUI lays the
+        // children out inside the end padding, and keeps the frame of a slot it
+        // has animated away. Sliding by the full width then parks the icons that
+        // do paint a whole strip short of the label, which is the hole between
+        // the last icon and the reading. Only the placed boxes that paint count.
+        final int empty = trailingEmptyWidth(container);
+        final float shift = -((rowContentEnd(container) - empty) - room);
         if (container.getTranslationX() != shift) {
             container.setTranslationX(shift);
+        }
+        if (debugLog()) {
+            log(LOG_INFO, "row fit: room=" + room + " shift=" + shift
+                    + " leftMost=" + leftMost + " end=" + rowContentEnd(container)
+                    + " empty=" + empty + " row=" + container.getWidth()
+                    + " pad=" + container.getPaddingLeft() + "/" + container.getPaddingRight());
         }
 
         // The island takes the row's end for itself: MIUI slides the row's own
@@ -3896,7 +3908,7 @@ final class TrioHooks {
                 continue;
             }
             final int w = child.getMeasuredWidth();
-            if (w <= 0 || isCollapsed(child)) {
+            if (w <= 0 || isCollapsed(child) || paintsNothing(child)) {
                 continue;
             }
             shown.add(child);
@@ -3968,6 +3980,82 @@ final class TrioHooks {
     /** Right edge of a child as drawn, in the row's own coordinates. */
     private static int rightOf(View v) {
         return (int) (v.getLeft() + v.getTranslationX()) + v.getMeasuredWidth();
+    }
+
+    /**
+     * True when a native slot is laid out but paints nothing.
+     *
+     * <p>MIUI keeps a slot's frame while it animates the icon away - the view
+     * stays VISIBLE and the icon's appear amount runs to zero - so the row can
+     * end in a run of boxes that draw no ink. Room reserved for the label
+     * against the row's own edge then shows up as a hole between the last icon
+     * and the label, which is the space the user sees.
+     */
+    private static boolean paintsNothing(View child) {
+        if (child == null) {
+            return true;
+        }
+        if (child.getVisibility() != View.VISIBLE || child.getAlpha() == 0f) {
+            return true;
+        }
+        final Object appear = Refl.callByName(child, "getIconAppearAmount");
+        if (appear instanceof Number && ((Number) appear).floatValue() == 0f) {
+            return true;
+        }
+        if (child instanceof android.widget.ImageView
+                && ((android.widget.ImageView) child).getDrawable() == null) {
+            return true;
+        }
+        return false;
+    }
+
+    /** A box MIUI actually placed in this row, rather than a folded slot. */
+    private static boolean isPlacedInRow(View child) {
+        return child != null && child.getMeasuredWidth() > 0
+                && (child.getLeft() != 0 || child.getTranslationX() != 0f);
+    }
+
+    /**
+     * The width of the run of boxes at the end of the native icon row that paint
+     * nothing. Zero when the row ends on a drawn icon, which is the ordinary
+     * case and leaves every number below it unchanged.
+     */
+    private static int trailingEmptyWidth(ViewGroup row) {
+        final List<View> children = new ArrayList<View>();
+        for (int i = 0; i < row.getChildCount(); i++) {
+            final View child = childAt(row, i);
+            if (isPlacedInRow(child)) {
+                children.add(child);
+            }
+        }
+        sortByDrawnRight(children);
+        int total = 0;
+        for (int i = 0; i < children.size(); i++) {
+            final View child = children.get(i);
+            if (!paintsNothing(child)) {
+                break;
+            }
+            total += child.getMeasuredWidth();
+        }
+        return total;
+    }
+
+    /**
+     * The right edge of the row's own layout: the furthest box MIUI placed in
+     * it. Measured rather than assumed to be the row's width, because MIUI lays
+     * the children out inside the end padding this module grows - the boxes stop
+     * short of the row's edge by exactly the room the label was given, and
+     * treating the edge as the end parks the icons a whole strip too far left.
+     */
+    private static int rowContentEnd(ViewGroup row) {
+        int end = 0;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            final View child = childAt(row, i);
+            if (isPlacedInRow(child)) {
+                end = Math.max(end, rightOf(child));
+            }
+        }
+        return end > 0 ? end : row.getWidth();
     }
 
     private static void sortByDrawnRight(List<View> views) {
