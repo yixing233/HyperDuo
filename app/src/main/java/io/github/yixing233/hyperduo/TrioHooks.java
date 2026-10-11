@@ -1408,6 +1408,14 @@ final class TrioHooks {
                 ISLAND_VIEWS.add(new WeakReference<View>(view));
             }
         }
+        // The window root as well: the island's other content views - the pill
+        // and the expanded card - were inflated before this module's hooks ran,
+        // so they are never seen being added. They can still be found by walking
+        // down from the root the one captured view belongs to.
+        final View window = rootOf(view);
+        if (window != view) {
+            sIslandRoot = new WeakReference<View>(window);
+        }
     }
 
     /**
@@ -1424,30 +1432,25 @@ final class TrioHooks {
         // of them is up at a time. The empty one is skipped when something real
         // is showing, because it spans the window and would read as an island
         // across the whole bar.
-        View empty = null;
+        final WeakReference<View> ref = sIslandRoot;
+        final View window = (ref == null) ? null : ref.get();
+        View widest = null;
+        if (window != null) {
+            widest = widestIsland(window, false);
+            if (widest == null) {
+                widest = widestIsland(window, true);
+            }
+        }
+        if (widest != null) {
+            return widest;
+        }
         synchronized (ISLAND_VIEWS) {
             for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
                 final View candidate = ISLAND_VIEWS.get(i).get();
-                if (candidate == null || candidate.getVisibility() != View.VISIBLE
-                        || candidate.getWidth() <= 0) {
-                    continue;
+                if (candidate != null && candidate.getVisibility() == View.VISIBLE
+                        && candidate.getWidth() > 0) {
+                    return candidate;
                 }
-                if (candidate.getClass().getName().contains("Empty")) {
-                    empty = candidate;
-                    continue;
-                }
-                return candidate;
-            }
-        }
-        if (empty != null) {
-            return empty;
-        }
-        final WeakReference<View> ref = sIslandRoot;
-        final View window = (ref == null) ? null : ref.get();
-        if (window != null) {
-            final View island = findIsland(window);
-            if (island != null) {
-                return island;
             }
         }
         return findIsland(rootOf(fallback));
@@ -4217,6 +4220,35 @@ final class TrioHooks {
             }
         }
         return null;
+    }
+
+    /**
+     * The widest island view under {@code view}, ignoring the empty content view
+     * unless {@code allowEmpty}. Only one of the island's content views is up at
+     * a time, and the empty one spans the window, so it is the wrong thing to
+     * measure whenever something real is showing.
+     */
+    private static View widestIsland(View view, boolean allowEmpty) {
+        View best = null;
+        try {
+            if (isIsland(view) && view.getVisibility() == View.VISIBLE && view.getWidth() > 0
+                    && (allowEmpty || !view.getClass().getName().contains("Empty"))) {
+                best = view;
+            }
+        } catch (Throwable ignored) {
+            // a view that will not answer is not the island
+        }
+        if (view instanceof ViewGroup) {
+            final ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                final View found = widestIsland(childAt(group, i), allowEmpty);
+                if (found != null
+                        && (best == null || found.getWidth() > best.getWidth())) {
+                    best = found;
+                }
+            }
+        }
+        return best;
     }
 
     /** The view's box on screen, for the diagnostics. */
