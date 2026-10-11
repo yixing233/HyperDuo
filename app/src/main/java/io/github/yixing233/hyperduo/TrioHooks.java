@@ -1349,52 +1349,48 @@ final class TrioHooks {
      * for the island, which is what makes its position knowable at all.
      */
     private static int hookIslandWindow(XposedModule module, ClassLoader cl) {
-        final Class<?> cls = Refl.cls("android.view.ViewRootImpl", cl);
-        if (cls == null) {
-            log(module, "ViewRootImpl missing");
+        final Class<?> group = Refl.cls("android.view.ViewGroup", cl);
+        if (group == null) {
+            log(module, "ViewGroup missing");
             return 0;
         }
         final XposedInterface.Hooker hooker = new XposedInterface.Hooker() {
             @Override
             public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                final Object result = chain.proceed();
-                final Object root = chain.getArg(0);
-                if (!(root instanceof View)) {
-                    return result;
-                }
-                // The window is recognised by its title, and its root kept: the
-                // island's own views are inflated after this call, so searching
-                // here would come up empty. The search happens on each use.
-                CharSequence title = null;
-                try {
-                    final Object attrs = chain.getArg(1);
-                    if (attrs instanceof android.view.WindowManager.LayoutParams) {
-                        title = ((android.view.WindowManager.LayoutParams) attrs).getTitle();
+                final Object arg = chain.getArg(0);
+                if (arg instanceof View) {
+                    final View child = (View) arg;
+                    if (isIsland(child)) {
+                        sIslandRoot = new WeakReference<View>(child);
+                        if (sIslandWindows < 10) {
+                            sIslandWindows++;
+                            log(LOG_INFO, "island view: " + child.getClass().getName());
+                        }
                     }
-                } catch (Throwable ignored) {
-                    // no title to read: fall back to the class name below
                 }
-                final boolean island = (title != null && title.toString().contains("sland"))
-                        || findIsland((View) root) != null;
-                if (sIslandWindows < 20) {
-                    sIslandWindows++;
-                    log(LOG_INFO, "window: title=" + title
-                            + " root=" + root.getClass().getName()
-                            + " island=" + island);
-                }
-                if (island) {
-                    sIslandRoot = new WeakReference<View>((View) root);
-                }
-                return result;
+                return chain.proceed();
             }
         };
-        int n = hook(module, Refl.method(cls, "setView", View.class,
-                        android.view.WindowManager.LayoutParams.class, View.class, int.class),
-                "hyperduo-island-window", hooker);
-        n += hook(module, Refl.method(cls, "setView", View.class,
-                        android.view.WindowManager.LayoutParams.class, View.class),
-                "hyperduo-island-window3", hooker);
+        // The island's window is created before any hook of this module runs, so
+        // waiting for ViewRootImpl.setView never saw it. Every view is added to a
+        // parent through one of these, whenever it is created.
+        int n = hook(module, Refl.method(group, "addView", View.class),
+                "hyperduo-island-add", hooker);
+        n += hook(module, Refl.method(group, "addView", View.class, int.class),
+                "hyperduo-island-add-at", hooker);
+        n += hook(module, Refl.method(group, "addView", View.class, int.class,
+                        android.view.ViewGroup.LayoutParams.class),
+                "hyperduo-island-add-lp", hooker);
         return n;
+    }
+
+    /** True for the super island's own views. */
+    private static boolean isIsland(View view) {
+        try {
+            return view.getClass().getName().contains("ynamicIsland");
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /**
