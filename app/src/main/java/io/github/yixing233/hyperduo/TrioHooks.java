@@ -4001,8 +4001,13 @@ final class TrioHooks {
         // thing carrying the signal.
         final OutSignalView signal = findOutSignal(battery);
         final OutTypeLabel label = findOutTypeLabel(battery);
-        final boolean islandUp = !islandHideBattery()
-                && (islandCovers(signal) || islandCovers(label));
+        // An island that is actually showing, not the empty content view the
+        // island's window keeps up when there is nothing on. Its extent cannot be
+        // measured - the widest view in that window is a full-width container, so
+        // comparing boxes would read as an island across the whole bar - but its
+        // presence is enough: while it is up it holds the row's end, which is
+        // where the reading is.
+        final boolean islandUp = !islandHideBattery() && islandShowing();
         fade(signal, islandUp ? 0f : 1f);
         fade(label, islandUp ? 0f : 1f);
 
@@ -4220,6 +4225,26 @@ final class TrioHooks {
             }
         }
         return null;
+    }
+
+    /** True while a super island is on screen, the empty content view aside. */
+    private static boolean islandShowing() {
+        final WeakReference<View> ref = sIslandRoot;
+        final View window = (ref == null) ? null : ref.get();
+        if (window != null && widestIsland(window, false) != null) {
+            return true;
+        }
+        synchronized (ISLAND_VIEWS) {
+            for (int i = 0; i < ISLAND_VIEWS.size(); i++) {
+                final View candidate = ISLAND_VIEWS.get(i).get();
+                if (candidate != null && candidate.getVisibility() == View.VISIBLE
+                        && candidate.getWidth() > 0
+                        && !candidate.getClass().getName().contains("Empty")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
