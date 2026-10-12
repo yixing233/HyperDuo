@@ -3443,6 +3443,10 @@ final class TrioHooks {
         if (label.getVisibility() != View.VISIBLE) {
             label.setVisibility(View.VISIBLE);
         }
+        // Forced first: the text can grow between passes - "5G" becomes "5GA" -
+        // and a view that believes it has already answered this measure hands
+        // back the old width, which then clips the new text to the old box.
+        label.forceLayout();
         label.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         // Measured first, because the strip the native row has to give up is the
@@ -3454,6 +3458,9 @@ final class TrioHooks {
         if (debugLog()) {
             log(LOG_INFO, "out type: \"" + text + "\" size=" + size
                     + " label=" + label.getWidth() + "x" + label.getHeight()
+                    + " mw=" + label.getMeasuredWidth()
+                    + " want=" + android.text.Layout.getDesiredWidth(
+                            label.getText(), label.getPaint())
                     + " at " + label.getLeft() + "," + label.getTop()
                     + " anchor=" + anchor.getLeft() + ".." + anchor.getRight()
                     + " container=" + container.getWidth() + "x" + container.getHeight());
@@ -4009,9 +4016,21 @@ final class TrioHooks {
         return false;
     }
 
-    /** A box MIUI actually placed in this row, rather than a folded slot. */
+    /**
+     * A box MIUI actually placed in this row, rather than one that is not in the
+     * layout at all.
+     *
+     * <p>GONE is the one that has to be filtered out by hand: MIUI's first layout
+     * pass parks every child, folded ones included, at the row's left edge with
+     * its last measured width, and a translation left over from an earlier layout
+     * survives that. Such a child carries a frame from another orientation or
+     * from before it was folded, and reading it as a placed box hands the row an
+     * end that is nowhere near its real one.
+     */
+
     private static boolean isPlacedInRow(View child) {
-        return child != null && child.getMeasuredWidth() > 0
+        return child != null && child.getVisibility() != View.GONE
+                && child.getMeasuredWidth() > 0
                 && (child.getLeft() != 0 || child.getTranslationX() != 0f);
     }
 
